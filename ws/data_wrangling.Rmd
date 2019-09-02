@@ -3,6 +3,15 @@ title: "Data wrangling"
 author: "Murray Logan"
 date: "`r format(Sys.time(), '%d %B, %Y')`"
 output:
+  pdf_document:
+    df_print: default
+    fig_caption: yes
+    fig_height: 4
+    fig_width: 4
+    highlight: tango
+    latex_engine: xelatex
+    number_sections: yes
+    toc_depth: 2
   html_document:
     code_folding: show
     collapse: no
@@ -14,16 +23,7 @@ output:
     theme: spacelab
     toc: yes
     toc_float: yes
-    css: resources/style.css
-  pdf_document:
-    df_print: default
-    fig_caption: yes
-    fig_height: 4
-    fig_width: 4
-    highlight: tango
-    latex_engine: xelatex
-    number_sections: yes
-    toc_depth: 2
+    css: ../resources/style.css
   word_document:
     fig_caption: yes
     fig_height: 4
@@ -38,7 +38,7 @@ mainfont: Arial
 mathfont: LiberationMono
 monofont: DejaVu Sans Mono
 classoption: a4paper
-bibliography: resources/references.bib
+bibliography: ../resources/references.bib
 ---
 
 ```{r setup, include=FALSE, warnings=FALSE, message=FALSE}
@@ -78,51 +78,208 @@ Important data manipulation functions:
 # Data files
 
 ```{r getData, results='markdown', eval=TRUE}
-load(file='data/manipulationDatasets.RData')
+load(file = "../data/manipulationDatasets.RData")
 data.1 %>% head
 ```
 
 Sorting data
 ================
+```{r}
+head(data.1, 2)
+arrange(data.1, LAT)
+#OR
+data.1 %>% arrange(LAT)
+```
+Sorting by LAT in descending order
+```{r}
+arrange(data.1, -LAT)
+```
+Sorting by Cond and then Temp
+```{r}
+arrange(data.1, Cond, Temp)
+```
+Other examples of sorting:
+- arrange(data.1, Cond+Temp)
+- arrange(data.1, Cond/Temp)
+
+```{r}
+data.1 %>% arrange(Between, Cond)
+```
+
+```{r}
+data.1 %>% arrange(Cond, Temp/LAT)
+```
+
 
 
 Manipulating factors
 =======================
+```{r}
+levels(data.1$Cond)
+```
+This is not actually a level, but an attribute. If you were to use this data, the order will be H, L, M. This is alphabetical, but not necessarily logical.
+
+```{r}
+str(data.1$Cond)
+```
+```{r}
+data.3 <- data.1
+levels(data.3$Cond)
+data.3$Cond <- factor(data.3$Cond, levels=c("L","M","H"))
+levels(data.3$Cond)
+```
+We're reordering the data,in the new set of data (data.3). The levels are now renamed.
 
 
 Subset columns
 =================
+```{r}
+select(data.1, Between, Plot, Cond, Time, Temp) %>% #subset
+  arrange(Cond) 
+```
+We can state what we want or what we don't want by negatives
+```{r}
+select(data.1, -LAT, -LONG) %>%
+  arrange(Cond)
+```
+
+##Selecting columns (select)
+```{r}
+select(data.1, starts_with('L'))
+```
+Or we could use 
+- select(data.1, ends_with('t'))
+
+Select lat,long and cloud..
+```{r}
+nasa %>% select(lat, long, starts_with('cloud'))
+nasa %>% select(lat, long, matches('^cloud.*')) #the regular expression format
+```
+
+```{r}
+tikus %>% dplyr::select(rep, time, everything(), -contains('pora')) #In tikus, select rep, time and only species that DONT contain pora
+dplyr::select(tikus, `Pocillopora damicornis`) #select awkward names
+```
+*when using select, make sure to use ONLY dplyr!!
+
+```{r}
+pull(data.1, Temp) #pulls out a vector of variables
+```
+
+
 
 ## Regular expressions (regex)
 
+
 https://github.com/rstudio/cheatsheets/raw/master/data-transformation.pdf
 
+```{r}
+select(data.1, matches('^T[a-z]m.'))
+```
+In regular expression land:
+- ^T starts with capital T
+- [] something in this region must be lower case, between a and z
+- the third letter must be an m
+- the fourth character can be anything
+- there are only 4 characters
 
 Filtering
 =============
+```{r}
+head(data.1, 2)
+filter(data.1, Cond=='H') #include rows for which the statement is true
+filter(data.1, Cond %in% c('H','M')) #is condition in H or M, as long as it evaluates to a true... or false
+filter(data.1, Cond=='H' & Temp<25)
+filter(data.1, Cond=='H' | Temp<25) #pipe in R means "or". They don't both need to be true.
+```
+```{r}
+head(data.1, 2)
+filter(data.1, Temp<20, (LAT>20 | LONG<145))
+```
+
+Filter to the largest ozone value for the second month of the last year
+```{r}
+filter(nasa,year==max(year) & month==2) %>%
+  arrange(-ozone) %>% head(5) #top 5 highest
+```
+
+#Effects of filtering
+```{r}
+data.3 = filter(data.1, Plot=='P1') 
+levels(data.3$Cond)
+levels(data.3$Plot)
+levels(data.3$Between)
+data.3 = filter(data.1, Plot == 'P1') %>% droplevels
+levels(data.3$Plot)
+```
+
 
 Adding columns - mutate
 ===========================
+```{r}
+mutate(data.1, log.Temp=log(Temp)) #there's a new variable named log.Temp and its equal to the log of temp.
+```
 
 
 Summarising (aggregating) data
 =================================
+```{r}
+SE = function(x) {
+  return(sd(x)/sqrt(length(x)))
+  } #writes a function for standard error. You start by declaring the function
+summarise(data.1, MeanTemp=mean(Temp), VarTemp=var(Temp), SEM=SE(Temp))
+
+data.1 %>% summarise(mean(Temp), mean(LAT), mean(LONG))
+#OR
+data.1 %>% summarize_at(vars(Temp, LAT, LONG), mean)
+
+data.1 %>% summarize_at(vars(Temp, LAT, LONG), funs(mean,var,sd,SE))
+data.1 %>% summarize_if(is.numeric, funs(mean,var,sd,SE))
+#if we want the mean and the variance
+```
+
 
 Piping
 =======
 
 Grouping (=aggregating)
 =========================
+```{r}
+data.1 %>% group_by(Cond) %>%
+  summarise(Mean=mean(Temp))
+
+data.1 %>% group_by(Cond) %>%
+  summarise(Mean=mean(Temp), Variance = var(Temp))
+#OR
+data.1 %>% group_by(Cond) %>%
+  summarise_at(vars(Temp), funs(mean,var))
+```
+
+
 
 Reshaping data
 =================
 
 ## Gathering
 
+```{r}
+data.w %>% gather(key = Time, value = Response, Time.0, Time.1, Time.2)
+```
+
+
 ## Spread
+
 
 Combining data
 =================
+
+Merging data frames
+```{r}
+inner_join(data.bio, data.chem) #includes everything about data.bio and adds what it can from data.chem. It only gives where there's a match from both
+
+full_join(data.bio, data.chem) #keeps all the data regardless
+```
+
 
 Applied examples
 ===================

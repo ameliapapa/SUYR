@@ -15,7 +15,7 @@ csl: resources/marine-pollution-bulletin.csl
 
 # Load Data and packages
 ```{r}
-library(tidyverse)
+library(dplyr)
 ```
 
 ```{r createdata}
@@ -29,6 +29,7 @@ dat = data.frame(y,x)
 
 ```{r fig1, fig.cap='The figure caption.'}
 # this is a comment
+library(ggplot2)
 ggplot(dat, aes(x,y)) + geom_point()
 ```
 

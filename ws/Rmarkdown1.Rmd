@@ -60,7 +60,7 @@ an external resource like <http://www.flutterbys.com.au/stats> or [this](http://
 
 Images can be embedded, for example:
 
-![](resources/rmarkdown-2.0-1.png)
+![](../resources/rmarkdown-2.0.png)
 
 
 Equations are included between single \$ (for inline equations) and double \$\$ for blocked equations like:
