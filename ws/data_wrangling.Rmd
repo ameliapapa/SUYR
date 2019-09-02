@@ -24,6 +24,18 @@ output:
     toc: yes
     toc_float: yes
     css: ../resources/style.css
+<<<<<<< HEAD
+=======
+  pdf_document:
+    df_print: default
+    fig_caption: yes
+    fig_height: 4
+    fig_width: 4
+    highlight: tango
+    latex_engine: xelatex
+    number_sections: yes
+    toc_depth: 2
+>>>>>>> 35e928792a3b0848a4571501b36c237792cffffb
   word_document:
     fig_caption: yes
     fig_height: 4
@@ -78,7 +90,11 @@ Important data manipulation functions:
 # Data files
 
 ```{r getData, results='markdown', eval=TRUE}
+<<<<<<< HEAD
 load(file = "../data/manipulationDatasets.RData")
+=======
+load(file='../data/manipulationDatasets.RData')
+>>>>>>> 35e928792a3b0848a4571501b36c237792cffffb
 data.1 %>% head
 ```
 
