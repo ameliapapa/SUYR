@@ -52,8 +52,8 @@ Load the necessary libraries
 ```{r libraries, results='markdown', eval=TRUE, message=FALSE, warning=FALSE}
 library(tidyverse) #for data wrangling
 library(grid)
-library(scales)
-library(gridExtra)
+library(scales) #colour, shape, fill, etc. scales
+library(gridExtra) #arranging multiple graphs together
 ```
 
 Graphics infrastructure
@@ -62,8 +62,8 @@ Graphics infrastructure
 - **layers** of data driven objects
 - **coord**inate system
 - **scales**
-- **faceting**
-- **themes**
+- **faceting** #how many graphs there are together
+- **themes** #gives it a consistency, an overall look
 
 
 Motivating data
@@ -84,40 +84,158 @@ Layers
     - **position** control
 
 ## geom_point
+```{r}
+ggplot(CO2)+geom_point(aes(x=conc,y=uptake), colour="red")
+```
+
 
 Primary geometric objects
 ===========================
+```{r}
+p <- ggplot() + #single layer - points
+  layer(data=BOD, #data.frame
+    mapping=aes(y=demand,x=Time),
+    stat="identity", #use original data
+    geom="point", #plot data as points
+    position="identity",
+    params = list(na.rm = TRUE),
+    show.legend = FALSE
+  )+ #layer of lines
+  layer( data=BOD, #data.frame
+    mapping=aes(y=demand,x=Time),
+    stat="identity", #use original data
+    geom="line", #plot data as a line
+    position="identity",
+    params = list(na.rm = TRUE),
+    show.legend = FALSE
+  ) +
+  coord_cartesian() + #cartesian coordinates
+  scale_x_continuous() +
+  scale_y_continuous()
+
+##OR
+
+ggplot(data=BOD, map=aes(y=demand, x = Time)) +geom_point()+geom_line()
+
+##OR WITH PIPING
+
+BOD %>% ggplot(map=aes(y=demand, x = Time))+ #anything that has a scale goes inside aes, which stands for 'aesthetics'
+  geom_point()+ geom_line()
+```
+
 
 `geom_bar`
 ------------
+```{r}
+ggplot(diamonds) + geom_bar(aes(x = carat)) #produces a histogram with continuous data. It bins data into columns
 
+#if instead what we provide is categorical data, we get a bar chart.
+
+ggplot(diamonds) + geom_bar(aes(x=cut, fill=clarity))
+#both cut and clarity are categorical variables, so its counting up the data in each case
+#the default position is stacked, but we can tell them to 'dodge'. Instead of being vertical, they're horizontal
+ggplot(diamonds) + geom_bar(aes(x=cut, fill=clarity), position = 'dodge')
+
+```
 
 `geom_boxplot`
 ----------------
+```{r}
+diamonds %>% ggplot() + geom_boxplot(aes(y=carat))
+ggplot(diamonds) + geom_boxplot(aes(x = cut, y = carat))
+```
 
 
 `geom_line`
 -------------
+```{r}
+CO2 %>% ggplot() + geom_line(aes(x=conc, y = uptake, group = Plant))
+#a group doesn't have a scale, just asks to plot things with scale separately
+CO2 %>% ggplot() + geom_line(aes(x=conc, y = uptake, color = Plant))
+#when you use an aesthetic like color or line type, you identify the groups
+```
 
 
 `geom_point`
 ------------
+```{r}
+ggplot(CO2) + geom_point(aes(x = conc, y = uptake, fill=Treatment),
+  shape=21)
+```
 
 `geom_smooth`
 ------------
+```{r}
+CO2 %>% ggplot(aes(x = conc, y = uptake)) + 
+  geom_smooth() + 
+  geom_point() + 
+  geom_smooth(method = 'lm', color = 'red', linetype = 'dashed')
+  
+##OR
+
+ggplot(CO2, aes(x=conc, y=uptake)) +
+  geom_smooth(aes(color='Loess')) +
+  geom_point() +
+  geom_smooth(method = 'lm', aes(color = 'LM'))
+```
+```{r}
+ggplot(CO2) + geom_smooth(aes(x = conc, y = uptake, fill=Treatment))
+```
+
 
 `geom_polygon`
 ----------------
+```{r}
+library(maps)
+library(mapdata)
+aus <- map_data("worldHires", region="Australia")
+head(aus,3)
+
+ggplot(aus, aes(x=long, y = lat)) +
+  geom_polygon()
+```
+Group plots different things separately. Each of the islands and regions are separate polygons. This plots polygons, irrespective of how they're grouped. 
+```{r}
+ggplot(aus, aes(x=long, y = lat,group = group)) +
+  geom_polygon(fill = 'red', color = 'red')
+```
 
 `geom_tile`
 ----------------
+```{r}
+head(faithfuld, 3)
+ggplot(faithfuld, aes(waiting, eruptions)) +
+  geom_tile(aes(fill = density))
+#Its plotting lots of different squares, and fills it that color
+#For tile to work, you need a full grid of data. You need every x and y coordinate of every square
+```
+
 
 `geom_raster`
 ----------------
+```{r}
+#If you don't have an exact grid raster does an interpolation of the data. It takes the middle point of the random values, and produces the grid itself.
+ggplot(faithfuld, aes(waiting, eruptions)) +
+  geom_raster(aes(fill = density))
+```
+
 
 Secondary geometric objects
 ============================
-
+Calculate mean no.of breaks per wool type
+```{r}
+warpbreaks.sum = warpbreaks %>% group_by(wool) %>%
+  summarise(Mean = mean(breaks), Lower = min(breaks), Upper = max(breaks))
+warpbreaks.sum %>% ggplot(aes(x=wool, y=Mean)) +
+  geom_point() +
+  geom_errorbar(aes(ymin = Lower, ymax = Upper), width = 0.2)
+#more commonly, the cap on the top is missing
+warpbreaks.sum %>% ggplot(aes(x=wool, y=Mean)) +
+  geom_point() +
+  geom_linerange(aes(ymin = Lower, ymax = Upper), width = 0.2)
+```
+It produced a tibble. A dataframe puts a different collection of data types, as long as the're the same length. A tibble will produce only as many columns can pe printed on the screen. Underneath every cell, a dataframe can only have one number. A tibble can have tables within cells, etc. 
+ 
 `geom_errorbar`
 ------------------
 
@@ -126,6 +244,22 @@ Secondary geometric objects
 
 Coordinate systems
 ====================
+```{r}
+head(CO2, 3)
+ggplot(CO2) +geom_point(aes(x=conc, y = uptake)) + coord_flip()
+```
+
+Changing coordinates is particulary important for maps. Pretty neat!
+```{r}
+library(maps)
+library(mapdata)
+aus <- map_data("worldHires", region="Australia")
+ggplot(aus, aes(x=long, y=lat, group=group)) +
+  coord_map("ortho", orientation=c(-20,125,23.5))+
+  geom_polygon()
+```
+
+
 
 
 Scales
@@ -133,6 +267,36 @@ Scales
 
 `scale_x_` and `scale_y_`
 ----------------------------
+```{r}
+head(CO2,2)
+#I want to customize the scale of the x axis:
+ggplot(CO2, aes(conc,uptake)) + geom_point() +
+  scale_x_continuous(name="CO2 conc") #ask for continuous data in this case
+
+ggplot(CO2, aes(y=uptake,x=conc)) + geom_point()+
+    scale_x_continuous(name=expression(
+        Ambient~CO[2]~concentration~(mg/l))) #this is a mathematical expression. They can't have spaces, this is what we use the tilde for. Anything in square brackets become subscript. Superscript would be the hat character.
+
+#type demo(plotmath) in console to find how to do math symbols
+```
+#Adding more padding
+```{r}
+ggplot(CO2, aes(y=uptake,x=conc)) + geom_point()+
+  scale_x_continuous(name="CO2 conc", expand=c(0,200))
+```
+#Axis on a log scale
+```{r}
+ggplot(CO2, aes(conc,uptake)) +geom_point() +
+  scale_x_log10(name="CO2 conc",
+    breaks=as.vector(c(1,2,5,10) %o% 10^(-1:2)))
+#inside the scale_x_log10, we are nominating what the breaks will be
+```
+#Axis representing categorical data
+```{r}
+ggplot(CO2, aes(Treatment,uptake)) +geom_point() +
+  scale_x_discrete(name = "Treatment")
+```
+
 
 Other scales
 ---------------
@@ -145,21 +309,68 @@ Other scales
 
 `scale_size`
 ----------------
+#Size according to continuous variable 
+```{r}
+state=data.frame(state.x77,state.region, state.division,state.center) %>%
+    select(Illiteracy,state.region,x,y)
+head(state,2)
+ggplot(state, aes(y=y,x=x)) + geom_point(aes(size=Illiteracy))
+ggplot(BOD, aes(Time, demand, size=demand)) + geom_point() +
+  scale_size_continuous(name ="Demand", range = c(0,3))
+```
+
 
 `scale_shape`
 ----------------
+```{r}
+ggplot(CO2, aes(conc,uptake)) + geom_point(aes(shape=Treatment))
+#The shapes of the dots are determined by our variable treatment.
+#We might like to change the shapes however.
+
+ggplot(CO2, aes(conc,uptake)) + geom_point(aes(shape=Treatment)) +
+  scale_shape_manual(breaks = c("nonchilled", "chilled"), values = c(0,3))
+
+```
 
 `scale_linetype`
 ----------------
 
 `scale_fill` and `scale_color`
 -------------------------------
+```{r}
+ggplot(faithfuld, aes(waiting, eruptions)) +
+    geom_raster(aes(fill = density)) +
+    scale_fill_continuous(low='red',high='blue')
+
+ggplot(faithfuld, aes(waiting, eruptions)) +
+  geom_raster(aes(fill=density)) +
+  scale_fill_gradientn(colors = terrain.colors(10)) #you can also use colors = heat.colors(10) to use heat colours
+```
 
 Facets
 ==========
+Multiple plots of the same type
+```{r}
+ggplot(CO2) + geom_point(aes(conc, uptake, colour = Type)) + facet_wrap(~Plant)
+#the wrap is trying to make a square output by wrapping them around?
+```
+
+A grid would have a combination of the two variables
+```{r}
+ggplot(CO2) + geom_point(aes(conc, uptake, color = Type)) +
+  facet_grid(Type~Treatment) #it doesn't change the axis, since they have a common axis
+```
+
 
 Themes
 ==========
+```{r}
+ggplot(CO2, aes(conc, uptake)) +geom_point() + theme_classic() +
+  theme(axis.text.x = element_text(angle = 45))
+#to find how you can modify your theme type in console:
+#theme_classic()
+```
+
 
 `theme_classic`
 ----------------
@@ -178,3 +389,20 @@ Themes
 
 Practice
 ===========
+```{r}
+head(starwars)
+starwars.sum = starwars%>% group_by(gender) %>%
+  summarise(Mean = mean(height, na.rm = T), Lower = min(height, na.rm = T), Upper = max(height, na.rm = T))
+
+starwars.sum %>% ggplot(aes(gender, Mean)) + geom_point() + 
+  geom_linerange(aes(ymin = Lower, ymax = Upper))
+
+g = starwars %>% ggplot(aes(eye_color, fill = hair_color)) + geom_bar()
+g
+ggsave(file = '../resources/Junk.png', g, width = 400, height = 400, dpi = 300, limitsize = F) #../ means go back to the previous folder
+#width and height are specified in pixels, which is not R's default. limitsize=FALSE changes them to pixels.
+#you can also change units if its more convenient: units = 'cm'
+#you can change instead of png to pdf, but then you won't need dpi. Rather than drawing things in pixels, it uses lines. They're vector graphics.
+#it is useful to save your image in both formats just in case.
+```
+
