@@ -104,15 +104,65 @@ $$
 y_i \sim{} \mathcal{Bin}(n, p_i)\\
 ln\left(\frac{p_i}{1-p_i}\right) = \beta_0 + \beta_1 x_i
 $$
+```{r}
+
+ggplot(polis, aes(y=PA, x=RATIO)) +geom_point() +
+  geom_smooth(method = 'glm', formula = y~x, method.args = list(family = 'binomial')) #adds binomial smoother (classic sigmoidal shape)
+```
 
 
 # Fit the model
+```{r}
+polis.glm = glm(PA ~ RATIO, family = binomial(link = 'logit'), data = polis)
+```
+
 
 # Model validation
+```{r}
+plot(polis.glm)
+```
+In the residuals vs. leverage graph, we see that observation 3 has a large cook's distance.
 
-Explore a lack of fit
+#Explore a lack of fit
+```{r}
+#Comparing sum of squares resid to chi square distribution
+polis.resid = sum(resid(polis.glm, type = "pearson")^2)
+1-pchisq(polis.resid, polis.glm$df.resid) #0.571>0.05 there is no evidence for lack of fit. Our model is okay.
+```
+#Deviance
+It is like sum of square residuals, instead it uses log likelihoods
+```{r}
+1-pchisq(polis.glm$deviance, polis.glm$df.residual)
+```
+
+```{r}
+plot(allEffects(polis.glm, residuals = TRUE), type = 'response')
+#the pink dots are the partial residuals
+summary(polis.glm)
+glance(polis.glm)
+```
+```{r}
+1-(polis.glm$deviance/polis.glm$null) #R squared = 1- (unexplained/Total)
+#45% of all variability in where the lizards live depends on the shape of the island!!
+```
+
+```{r}
+#Threshold ratio
+ld50 = -polis.glm$coef[1]/polis.glm$coef[2]
+```
 
 # Model investigation / hypothesis testing
+```{r}
+library(MASS)
+ld = dose.p(polis.glm, p = c(0.5,0.9))
+ld.SE = attr(ld, "SE")
+ld = data.frame(LD = attr(ld,'p'),
+                Dose = as.vector(ld),
+                SE = ld.SE) %>%
+  mutate(lower = Dose - SE*qnorm(0.975), #confidence intervals
+         upper = Dose + SE*qnorm(0.975)) 
+ld 
+```
 
 
 # Predictions
@@ -120,6 +170,16 @@ Explore a lack of fit
 
 
 # Summary figures
+```{r}
+polis.grid = with(polis, list(RATIO = seq(min(RATIO), max(RATIO), len = 100)))
+newdata = emmeans(polis.glm, ~RATIO, at = polis.grid, type = 'response') %>% as.data.frame()
+
+newdata %>% ggplot(aes(y=prob, x = RATIO)) + 
+  geom_point(data = polis, aes(RATIO, PA))+
+  geom_ribbon(aes(ymin = asymp.LCL, ymax = asymp.UCL), fill = 'blue', alpha = 0.2) +
+  geom_line() +
+  theme_bw()
+```
 
 
 
