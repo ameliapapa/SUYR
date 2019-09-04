@@ -129,67 +129,81 @@ is a model matrix representing the intercept and effects of season, density and 
 
 ```{r eda}
 ggplot(quinn, aes(y=RECRUITS, x=SEASON, fill=DENSITY)) +
-     geom_boxplot()
+     geom_boxplot() #there's a relationship between mean and variance
 
 ggplot(quinn, aes(y=RECRUITS, x=SEASON, fill=DENSITY)) +
 geom_boxplot() +
-scale_y_log10()
+scale_y_log10() #no more relationship between mean and variance, because of the log transformation
 ```
+#Why the sqrt transformation is not a good idea.
+- If you're transforming your data, you want to be able to back transform.
+- When you back transform from a sqrt transformation, the order of the data can change, because of the negative values becoming positive.
+- A better option is possion, or negbin (or log+1)
+
 
 # Fit the model
 
 ```{r fitModel}
-quinn.glm <- glm(RECRUITS ~ DENSITY*SEASON, data=quinn, family=gaussian)
+quinn.glm <- glm(log(RECRUITS+1) ~ DENSITY*SEASON, data=quinn, family=gaussian)
 quinn.glm1 <- glm(RECRUITS ~ DENSITY*SEASON, data=quinn,
                   family=poisson(link='log'))
 AICc(quinn.glm, quinn.glm1)
 ```
+The gaussian model with the logs, is the better fit. Not necessarily the most logical.
 
 # Model validation
 
-```{r ValidateModel, results='markdown', eval=TRUE, fig.width=7, fig.height=7}
+```{r ValidateModel, results='markdown', eval=TRUE}
 autoplot(quinn.glm,which=1:6)
 autoplot(quinn.glm1,which=1:6)
 ```
 
 ```{r modelValidation2, results='markdown', eval=TRUE}
 ## goodness of fit
-1-pchisq(quinn.glm1$deviance, df=quinn.glm1$df.residual)
+1-pchisq(quinn.glm1$deviance, df=quinn.glm1$df.residual) #there's evidence that the poisson distribution is not a good fit
+#it could be because our data is overdispersed
+
+
 ## any evidence of overdispersion
-quinn.glm1$deviance/quinn.glm1$df.residual
+quinn.glm1$deviance/quinn.glm1$df.residual #there's evidence for overdispersion, because it is more than 3 
 ```
 
 ```{r modelValidation3, results='markdown', eval=TRUE}
 ## is this due to excessive zeros (zero-inflation)
-tab=table(quinn$RECRUITS==0)
+tab=table(quinn$RECRUITS==0) #40 non zeros and 2 zeros
 tab/sum(tab)
-## 5% is not many.. so it cant be zero-inflated
+## 5% of the observations are zero. it is not many.. so it cant be zero-inflated.we don't worry about it unless it is more than 15%
+#Negbin accounts for the additional level of zeros...
+
 ## how many 0's would we expect from a poisson distribution with a mean similar to our mean
-mean(quinn$RECRUITS)
-x=rpois(100000,lambda=mean(quinn$RECRUITS))
-tab.1 = table(x==0)
-tab.1/sum(tab.1)
+mean(quinn$RECRUITS) #the mean of our data would be about 18. I wouldn't expect many zeros, because it is close to the right end of the distribution
+x=rpois(100000,lambda=mean(quinn$RECRUITS)) #generating 100k values from a pois distribution, with the same mean as our data
+tab.1 = table(x==0) #asking how many of these are equal to zero
+tab.1/sum(tab.1) #by chance, I expect no zeros out of 100k
 ```
 
 ```{r fitModel2, results='markdown', eval=TRUE}
 library(MASS)
-quinn.nb = glm.nb(RECRUITS ~ DENSITY*SEASON, data=quinn)
+quinn.nb = glm.nb(RECRUITS ~ DENSITY*SEASON, data=quinn) 
 ```
 
-```{r modelValidation4, results='markdown', eval=TRUE, fig.width=7, fig.height=7}
-autoplot(quinn.nb,which=1:6)
+```{r modelValidation4, results='markdown', eval=TRUE}
+autoplot(quinn.nb)
 ```
 
 ```{r modelValidation5, results='markdown', eval=TRUE}
 ## goodness of fit
 1-pchisq(quinn.nb$deviance, df=quinn.nb$df.residual)
+#some evidence for lack of fit
+
 ## any evidence of overdispersion
-quinn.nb$deviance/quinn.nb$df.residual
+quinn.nb$deviance/quinn.nb$df.residual #good (1.6<3)
 ```
 
 ```{r modelValidation6, results='markdown', eval=TRUE}
 AICc(quinn.glm, quinn.glm1,quinn.nb)
 ```
+
 
 # Model investigation / hypothesis testing
 
@@ -197,11 +211,17 @@ AICc(quinn.glm, quinn.glm1,quinn.nb)
 library(effects)
 plot(allEffects(quinn.glm),multiline=TRUE, ci.style='bar')
 summary(quinn.glm)
+#the intercept is the first combination. Autumn-High = 2.8 unit
+#Spring is 0.6 units lower at high density. In Autumn, low density is 0.1 units higher than high density.
+#If there was no interaction, the lines would be parallel. But Low:Spring is 0.1 unit higher if there was no interaction, Low:Summer is 0.8 units lower than I would expect if there was no interaction.
+#There is not enough evidence, that there is an effect from density.
 
 
 plot(allEffects(quinn.nb),multiline=TRUE, ci.style='bar')
 plot(allEffects(quinn.nb),multiline=TRUE, ci.style='bar', type='link')
 summary(quinn.nb)
+#There is evidence of interaction of density and season in summertime.
+
 tidy(quinn.glm, conf.int=TRUE)
 tidy(quinn.nb, conf.int=TRUE, exponentiate=FALSE)
 
@@ -211,19 +231,22 @@ tidy(quinn.nb, conf.int=TRUE, exponentiate=FALSE)
 # Predictions
 
 ```{r mainEffects, results='markdown', eval=TRUE}
-emmeans(quinn.nb, pairwise~DENSITY|SEASON)
+emmeans(quinn.nb, pairwise~DENSITY|SEASON) #pairwise comparisons for density and do it separately for each season
+#our various contrasts tell us that there is no evidence for a density effect in autumn, spring or winter.
 
 emmeans(quinn.nb, pairwise~DENSITY|SEASON, type='response')
+#for summer, there is twice as many recruits in high density, compared to low density. the same ratio is at winter as well, but there is a higher SE, so we are not as confident.
 
 confint(emmeans(quinn.nb, pairwise~DENSITY|SEASON), type='response')
 
 eff = confint(emmeans(quinn.nb, pairwise~DENSITY|SEASON), type='response')
+#we capture the effects in a vector
 
-eff$contrasts %>% as.data.frame
+eff$contrasts %>% as.data.frame #turn in a data frame so tehy can be plotted
 
 eff$contrasts %>% as.data.frame %>%
     ggplot(aes(y=ratio, x=SEASON)) +
-    geom_pointrange(aes(ymin=asymp.LCL, ymax=asymp.UCL)) +
+    geom_pointrange(aes(ymin=asymp.LCL, ymax=asymp.UCL)) + 
     geom_hline(yintercept=1, linetype='dashed') +
     coord_flip() +
     theme_classic()
@@ -239,7 +262,24 @@ ggplot(newdata, aes(y=response, x=SEASON, fill=DENSITY)) +
 geom_pointrange(aes(ymin=asymp.LCL, ymax=asymp.UCL), shape=21,
                 position=position_dodge(width=0.2)) +
 theme_classic() +
-annotate(geom='text', x='Summer', y=70, label='*', size=7)
+annotate(geom='text', x='Summer', y=70, label='*', size=7)+
+  scale_y_continuous('Number of Mussel recruits')+
+  theme(axis.title.x = element_blank())
+```
+```{r}
+#If we want to change the order of our values:
+newdata = newdata %>% mutate(SEASON = factor(SEASON, levels=c('Autumn','Winter','Spring','Summer')))
+
+ggplot(newdata, aes(y=response, x=SEASON, fill=DENSITY)) +
+geom_pointrange(aes(ymin=asymp.LCL, ymax=asymp.UCL), shape=21,
+                position=position_dodge(width=0.2)) +
+theme_classic() +
+annotate(geom='text', x='Summer', y=70, label='*', size=7)+
+  scale_y_continuous('Number of Mussel recruits')+
+  theme(axis.title.x = element_blank(), #removes x axis
+        legend.position = c(0,1), legend.justification = c(0,1))+ #moves legend position topleft, and justify it topleft
+  scale_fill_manual('Density', values = c('white','black'))
+  
 ```
 
 
