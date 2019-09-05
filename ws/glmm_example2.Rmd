@@ -109,6 +109,8 @@ FISHID   MASS    TRIAL             SMR\_contr   CHANGE
 ```{r readData, results='markdown', eval=TRUE}
 norin = read_csv('../data/norin.csv', trim_ws=TRUE)
 glimpse(norin)
+
+norin = norin %>% mutate(FISHID = factor(FISHID), TRIAL = factor(TRIAL))
 ```
 
 
@@ -123,15 +125,116 @@ $$
 where $\boldsymbol{\beta}$ and $\boldsymbol{\gamma}$ are vectors of the fixed and random effects parameters respectively 
 and $\bf{X}$ is the  model matrix representing the overall intercept and effects of temperature and (centered) mean fish size on SDA peak.
 $\bf{Z}$ represents a cell means model matrix for the random intercepts associated with individual fish.
+```{r}
+ggplot(norin, aes(TRIAL, CHANGE)) + geom_boxplot()
+ggplot(norin, aes(SMR_contr, CHANGE, shape = TRIAL, color = TRIAL)) +
+  geom_smooth(method= 'lm') + geom_point()
+```
+
+```{r}
+ggplot(norin, aes(y= CHANGE, x = as.numeric(FISHID), color = TRIAL)) + 
+  geom_point() + geom_line()
+#we will consider using random slopes, because the lines intersect, and they're not always consistent
+```
+
+```{r}
+ggplot(norin, aes(y= CHANGE, x = MASS, color = TRIAL)) + 
+  geom_point() + geom_smooth(method = 'lm')
+#combining categorical and numerical data -> homogeneity of slopes
+```
+
 
 # Fit the model
+```{r}
+norin.lme = lme(CHANGE ~ TRIAL*SMR_contr+ MASS, random = ~1|FISHID, data = norin, method = 'ML')
+#any variable you add, adds a cost -> reduced df of residual -> power comes from df of residuals
+
+#you can add a covariate without costing the df of residual:
+norin.lme1 = lme(CHANGE ~ TRIAL*SMR_contr+ offset(MASS), random = ~1|FISHID, data = norin, method = 'ML')
+#an offset allows you to add a covariate, without consuming any df, because it doesn't estimate anything, but rather assumes
+#In this case, ot assumes theres a relationship between change and mass, and it assumes it has a slope of 1. for every 1 unit in change of MASS, there will be 1 change of unit in CHANGE
+#
+
+norin.lme1 = lme(CHANGE ~ TRIAL*SMR_contr, random = ~1|FISHID, data = norin, method = 'ML')
+```
 
 # Model validation
+```{r}
+AICc(norin.lme, norin.lme1)
+#we go for the simpler model with lower AIC
+```
+
+```{r}
+norin.lme1 = update(norin.lme1, method = 'REML')
+#norin.lme2 = update(norin.lme1, random = ~SMR_contr|FISHID, method = 'REML')
+#the model is too complicated to arrive to a conclusion
+norin.lme2 = update(norin.lme1, random = ~SMR_contr|FISHID, method = 'REML',
+                    control = lmeControl(opt='optim'))
+#We've switched it to the simplex optimizer. It requires more iterations (it is slower).
+#In a frequentist paradigm, you might be sitting in the end of the frequentist framework
+
+```
 
 # Model investigation / hypothesis testing
 
+```{r}
+AICc(norin.lme1, norin.lme2) 
+#we don't the added complexity of random slopes
+```
+
+```{r}
+plot(norin.lme1)
+```
+```{r}
+qqnorm(resid(norin.lme1))
+#it doesn't deviate much from the expected normal distributions
+#qqline(resid(norin.lme1))
+```
+
+
 # Predictions
+```{r}
+ggplot(data = NULL) + geom_point(aes(y = resid(norin.lme1, type = 'normalized'), x = norin.lme1$data$SMR_contr))
+```
+
+```{r}
+plot(allEffects(norin.lme1, residuals = TRUE))
+```
+
+```{r}
+summary(norin.lme1)
+#High variability in residuals can be due to measurement error
+
+#Fixed effects:
+#162 is the CHANGE in high temp group, when SMR_contr = 0
+#-120 is the change in CHANGE from high temp group to hypoxia group
+
+#Evidence of interaction:
+#There is evidence of interaction between hypoxia and the change in metabolic rate
+```
+
+```{r}
+intervals(norin.lme1)
+```
+
+```{r}
+emmeans(norin.lme1, pairwise ~TRIAL)
+#it is comparing averages of metabolic rates in the three trials
+#there is evidence to suggest a contrast between high temp - hypoxia and high temp - low salinity
+```
+```{r}
+r.squaredGLMM(norin.lme1)
+#In the end, we explained around 50% of the variability by just the fixed effects alone. 
+```
+
 
 # Summary figures
+```{r}
+norin.grid = with(norin, list(SMR_contr=seq(min(SMR_contr), max(SMR_contr), len = 100)))
+newdata = emmeans(norin.lme1, ~SMR_contr|TRIAL, at = norin.grid) %>%
+  as.data.frame()
+head(newdata)
+
+```
 
 # References
