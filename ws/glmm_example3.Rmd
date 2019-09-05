@@ -82,12 +82,12 @@ tree        Jan     85     tree1
 ..          ..      ..     ..
 
 --------------- ------------------------------------------------------------------------------
-**SITUATION**   Categorical listing of roosting situations (tree, nest-box, inside or other)
-**MONTH**       Categorical listing of the month of sampling.
+**SITUATION**   Categorical listing of roosting situations (tree, nest-box, inside or other) -> FIXED
+**MONTH**       Categorical listing of the month of sampling. -> FIXED
 **MASS**        Mass (g) of starlings.
-**BIRD**        Categorical listing of individual bird repeatedly sampled.
+**BIRD**        Categorical listing of individual bird repeatedly sampled. -> RANDOM
+**SITUATION:MONTH**   Interaction -> Split plot design
 --------------- ------------------------------------------------------------------------------
-
 
 # Read in the data
 
@@ -95,6 +95,12 @@ tree        Jan     85     tree1
 starling = read_csv('../data/starling_full.csv', trim_ws=TRUE)
 glimpse(starling)
 ```
+```{r}
+#1. Turn each categorical effectinto factors:
+starling = starling %>% mutate( MONTH = factor(MONTH, levels = c('Nov','Jan')), 
+                                SITUATION = factor(SITUATION), BIRD = factor(BIRD))
+```
+
 
 # Exploratory data analysis
 
@@ -107,15 +113,101 @@ $$
 where $\boldsymbol{\beta}$ and $\boldsymbol{\gamma}$ are vectors of the fixed and random effects parameters respectively 
 and $\bf{X}$ is the model matrix representing the overall intercept and effects of roosting situation and month on starling mass.
 $\bf{Z}$ represents a cell means model matrix for the random intercepts associated with individual birds.
+```{r}
+#Because we're considering a normal distribution, we need to asses normality and homogeneity of variance:
+ggplot(starling, aes(SITUATION, MASS, color = MONTH)) + geom_boxplot()
+```
+```{r}
+ggplot(starling, aes(MONTH, MASS, group = BIRD)) +
+  geom_point() +
+  geom_line() +
+  facet_grid(~SITUATION)
+#We need random intercept random slope model
+#Data collected over time, but we only have two time points, so we don't have a temporal pattern (no temporal autocorrelation).
+#Observations between bird 1 are correlated, and for bird 2 spearately.
+```
+
 
 # Fit the model
+```{r}
+#Exploring the fixed components
+starting.lme = lme(MASS~MONTH*SITUATION, random = ~1|BIRD, data = starling, method = 'ML')
+starting.lme1 = lme(MASS~MONTH+SITUATION, random = ~1|BIRD, data = starling, method = 'ML')
+#these models are trying to compare the fixed parts, not the random effects. The only difference between the two models is the fixed structure (interaction or no interaction). 
+
+#Compare the two models:
+AICc(starting.lme, starting.lme1) #The simpler model is the better fit. No interaction is necessary
+```
+```{r}
+starting.lme2 = lme(MASS~MONTH+SITUATION, random = ~1|BIRD, data = starling, method = 'REML')
+starting.lme3 = lme(MASS~MONTH+SITUATION, random = ~MONTH|BIRD, data = starling, method = 'REML') #random intercept, random slope
+```
 
 # Model validation
+```{r}
+AICc(starting.lme2,starting.lme3) #just the intercept model is fine
+```
 
 # Model investigation / hypothesis testing
+```{r}
+plot(starting.lme2) #no patterns in the residuals, homogeneity of variance was met
+```
+```{r}
+#Plot standardized residuals against each categorical variable
+ggplot(data = NULL) + geom_boxplot(aes(y = residuals(starting.lme2, type = 'normalized'), x = starling$MONTH))
+```
+
+```{r}
+ggplot(data = NULL) + geom_boxplot(aes(y = residuals(starting.lme2, type = 'normalized'), x = starling$SITUATION)) #boxes about same size and centred around zero
+```
+```{r}
+library(effects)
+plot(allEffects(starting.lme2), multiline = T, ci.style = 'bar')
+#There is a difference between dec and jan, and we will expect a difference between each situation
+```
 
 # Predictions
+```{r}
+summary(starting.lme2)
+#Random effects: Between (0.75) and within (4.11) variability
+#Fixed: 
+#1. Intercept -> Nov-inside -> 78.85
+#2. All birds are on average 9.1 units heavier in Jan. It was calculated for inside first, but we assumed that the lines are parallel(no interaction between month and treatment)
+#3. SITUATION other and tree causes variability in the MASS of starling
+```
+
+
+We can also compare each situation to each other:
+```{r}
+emmeans(starting.lme2, pairwise ~ SITUATION, conf.int = T)
+#there is no point in asking for pairwise interactions in month because there's only two of them and it has already been done
+
+#emmeans -> estimated marginal means
+#results are averaged over the level of month. 
+```
+```{r}
+#If we had an interaction between SITUATION AND MONTH:
+emmeans(starting.lme2, pairwise ~ SITUATION|MONTH, conf.int = T)
+```
+
+
+# R squared
+```{r}
+r.squaredGLMM(starting.lme2)
+#R squared associated with fixed effects -> 0.61
+#Random effect doesn't have much impact
+#We saw this when we saw the variance between birds was quite small.The main source of variability was not the birds
+```
 
 # Summary figures
+```{r}
+newdata = emmeans(starting.lme2, ~SITUATION+MONTH) %>%
+  as.data.frame()
+ggplot(newdata, aes(SITUATION, emmean,fill = MONTH)) + 
+  geom_pointrange(aes(ymin = lower.CL, ymax = upper.CL), shape = 21, 
+                  position = position_dodge(0.2)) +
+  theme_classic()
+```
+
 
 # References
