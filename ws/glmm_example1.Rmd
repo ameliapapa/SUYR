@@ -93,6 +93,16 @@ LEAF   TREAT    NUMBER
 tobacco = read_csv('../data/tobacco.csv', trim_ws=TRUE)
 glimpse(tobacco)
 ```
+Treatment (strong and weak) have to be factors, as well as our random effects.
+```{r}
+#Step 1: Turn leaf and treatment into categories
+tobacco = tobacco %>% mutate(LEAF = factor(LEAF), TREATMENT = factor(TREATMENT))
+
+#Assumptions:
+#1. Normality
+#2. Homogeneity of variance
+#3. Independence is violated
+```
 
 
 # Exploratory data analysis
@@ -106,15 +116,121 @@ $$
 where $\boldsymbol{\beta}$ and $\boldsymbol{\gamma}$ are vectors of the fixed and random effects parameters respectively 
 and $\bf{X}$ is the  model matrix representing the overall intercept and effects of the treatment on the number of lesions.
 $\bf{Z}$ represents a cell means model matrix for the random intercepts associated with leaves.
+```{r}
+#Assess normality:
+ggplot(tobacco, aes(TREATMENT, NUMBER)) + geom_boxplot()
+#No evidence of non-normality and the variances are roughly equal, when the outliers are considered.
+#At this stage, the gaussian model seems okay. No transformation or other distribution would be required.
+```
+```{r}
+ggplot(tobacco, aes(LEAF, NUMBER, linetype = TREATMENT, group = TREATMENT)) + geom_line()
+```
 
 # Fit the model
+```{r}
+library(nlme) #load the package
+
+tobacco.lme = lme(NUMBER~TREATMENT, random = ~1|LEAF, data = tobacco, method = 'REML') # random intercept model
+
+tobacco.lme1 = lme(NUMBER~TREATMENT, random = ~TREATMENT|LEAF, data = tobacco, method = 'REML') # random slope model
+```
 
 # Model validation
+```{r}
+AICc(tobacco.lme,tobacco.lme1)
+#simpler model is the better fit
+```
+```{r}
+#Calculate ratio of two likelihoods, and based on the df you can get a p value
+anova(tobacco.lme, tobacco.lme1)
+#there is no evidence that the two models differ in the amount that they don't explain
+#we might as well go for the simpler one
+```
 
 # Model investigation / hypothesis testing
+```{r}
+#Diagnostics: Standardized residuals plot
+plot(tobacco.lme)
+#there is no pattern observed, that's great?
+```
+```{r}
+#Model summary
+summary(tobacco.lme)
+#1. Random effects: we're interested in estimating variance.
+#They're expressed in stardard deviations. 3.7 is similar to 3.8, so there is a similar amount of variability between each leaf and each part of the leaf that was sampled.
+
+#2. Fixed effects:
+#The average number of legions in the strong treatment is represented by the intercept (34.9)
+
+```
+
+# Confidence intervals
+```{r}
+intervals(tobacco.lme)
+```
+
+# R squared values
+```{r}
+library(MuMIn)
+r.squaredGLMM(tobacco.lme)
+#R2m -> marginal -> averaging over the random effects -> therefore it is the Rsquared associated with the fixed effects
+
+#R2c -> conditional -> taking into account the random effects -> fixed and random together
+```
 
 # Predictions
+```{r}
+library(emmeans)
+newdata = emmeans(tobacco.lme, ~TREATMENT) %>% as.data.frame()
+newdata
+```
 
 # Summary figures
+```{r}
+ggplot(newdata, aes(TREATMENT, emmean)) + geom_pointrange(aes(ymin = lower.CL, ymax = upper.CL)) + theme_classic()
+```
+
+##NEW WAY
+- Deals with temporal and spatial autocorrelation
+- Optimization agent is better
+- Allows for interaction between interactions between fixed and random effects, but you rarely encounter this scenario
+
+```{r}
+library(lme4)
+#this library went through 4 iterations. 
+tobacco.lmer = lmer(NUMBER~TREATMENT + (1|LEAF), data = tobacco, REML = TRUE) #It is still a random intercept model
+
+#tobacco.lmer1 = lmer(NUMBER~TREATMENT + (TREATMENT|LEAF), data = tobacco, REML = T) 
+#the treatments within each leaf are the actual replicates, so it can't distingush them as subreplicates. nlme is not sensible of this.
+```
+
+```{r}
+plot(tobacco.lmer) #residual plot
+```
+```{r}
+summary(tobacco.lmer)
+#Random effects:
+#This summary expresses our variance in units of variance and standard deviations. There is variance associated with the random effects and the residuals.
+
+#Fixed effects:
+#NO P VALUES! The authors, are of the opinion that because the df are contradictory to calculate, there are no p- values associated with them.
+```
+
+```{r}
+confint(tobacco.lmer)
+#.sig01          0.000000  7.258834 -> LEAF
+#.sigma          2.333872  6.361451 -> Residuals
+#Confidence intervals are more important/useful than p-values
+```
+
+```{r}
+#If you need P-values 
+library(lmerTest) #it asks you to fit the model again, because it is using its own lmer
+tobacco.lmer = lmer(NUMBER~TREATMENT + (1|LEAF), data = tobacco, REML = T)
+summary(tobacco.lmer)
+```
+```{r}
+r.squaredGLMM(tobacco.lmer)
+```
 
 # References
