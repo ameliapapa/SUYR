@@ -130,13 +130,115 @@ and $\bf{X}$ is the model matrix representing the overall intercept and effects 
 Area of the place segment was also incorporated as an offset.
 $\bf{Z}$ represents a cell means model matrix for the random intercepts associated with individual plates.
 
+```{r}
+copper = copper %>% mutate(COPPER = factor(COPPER), PLATE = factor(PLATE), DIST = factor(DIST))
+```
+
+```{r}
+ggplot(copper, aes(y = WORMS, x= DIST, fill = COPPER)) + 
+  geom_boxplot()
+ggplot(copper, aes(y = WORMS, x= DIST, fill = COPPER)) +
+  geom_boxplot() +
+  scale_y_log10()
+ggplot(copper, aes(y = log(WORMS), x= DIST, fill = COPPER)) +
+  geom_boxplot()
+ggplot(copper, aes(y = WORMS, x= DIST, fill = COPPER)) +
+  geom_boxplot() +
+  scale_y_sqrt()
+```
+
+
 # Fit the model
+```{r}
+library(glmmTMB)
+copper.glmmTMB = glmmTMB(I(WORMS+0.5) ~ COPPER*DIST + (1|PLATE), 
+                         data = copper, family = Gamma(link = 'log'))
+ggplot(copper, aes(y = WORMS, x= as.numeric(PLATE), color = DIST)) +
+  geom_line() + facet_wrap(~COPPER)
+copper.glmmTMB1 = glmmTMB(I(WORMS+0.5) ~ COPPER*DIST + (DIST|PLATE),
+                          data = copper, family = Gamma(link = 'log'))
+ggplot()+ 
+  geom_point(data = NULL,
+             aes(y = residuals(copper.glmmTMB, type = 'pearson'),
+                 x = fitted(copper.glmmTMB)))
+ggplot()+ 
+  geom_point(data = NULL,
+             aes(y = residuals(copper.glmmTMB1, type = 'pearson'),
+                 x = fitted(copper.glmmTMB1)))
+```
+
+```{r}
+copper.glmmTMB2 = glmmTMB(I(WORMS+0.5) ~ COPPER*DIST+ (1|PLATE), 
+                          data = copper, family = tweedie(link = 'log'))
+#It enables the model to have some features similar to gamma or poisson, depending on what it needs.
+ggplot()+ 
+  geom_point(data = NULL,
+             aes(y = as.vector(residuals(copper.glmmTMB2)),
+                 x = fitted(copper.glmmTMB2)))
+```
+
+```{r}
+summary(copper.glmmTMB2)
+```
+
 
 # Model validation
+```{r}
+plot(allEffects(copper.glmmTMB2,
+                transformation = list(link = log, inverse = exp)),
+     multiline = TRUE, ci.style = 'bars') #effects plot back transformed
+```
+
+
+1. Interactions:
+- Week 2 deviates from control, whereas W1 follows the same trend
+- We will want to compare the effect of copper in each of the distances separate
 
 # Model investigation / hypothesis testing
 
+```{r}
+#4 sets of Tukeys tests to test the effect of COPPER in each DIST
+emmeans(copper.glmmTMB2, pairwise ~ COPPER|DIST, type = 'response')$contrasts
+#we want to have a look at the contrasts, and not emmeans
+# DIST 4: suggests that control is higher than W1 (34%), and W2 (68%). W1 is 26% higher than W2. 
+# DIST 3: the effects are larger, 43%, 187% and 100% from W1 to W2.
+# These trends are even greater at DIST 2 and greater in DIST 1. 
+```
+
+```{r}
+emmeans(copper.glmmTMB2, pairwise ~ DIST|COPPER, type = 'response') $contrasts
+#ALl comparisons have come out as significant, but because of TUKEY we have reduced power. 
+#1/0.908 = 1.101 the test detected the 10% change from DIST1 to DIST2 in control
+#the test says its significant, but looking at the effect size, we say it is not ecologically important
+#1/0.9833 = 1.016984  -> 0.16% change from DIST2 to DIST3 in W1. it shows as significant, but the effect size is way too small to be ecologically significant
+```
+
 # Predictions
+
+```{r}
+newdata = confint(emmeans(copper.glmmTMB2,
+                          pairwise~COPPER|DIST, type = 'response'))$contrasts %>% as.data.frame()
+head(newdata)
+
+g1 = ggplot(newdata, aes(y=ratio, x =contrast, color =DIST ))+ geom_pointrange(aes(ymin=lower.CL, ymax = upper.CL), position = position_dodge(width = 0.6)) + 
+  geom_hline(yintercept = 1) +
+  scale_y_log10() +
+  coord_flip() +
+  theme_bw()
+g1
+```
+
+```{r}
+newdata = confint(emmeans(copper.glmmTMB2, ~COPPER|DIST, type = 'response')) %>% as.data.frame()
+g2 = ggplot(newdata, aes(y=response, x =DIST, fill = COPPER))+ geom_pointrange(aes(ymin=lower.CL, ymax = upper.CL), shape = 21) + 
+  scale_y_log10() +
+  coord_flip() +
+  theme_bw()
+library(gridExtra)
+grid.arrange(g1, g2, nrow = 1) #allows you to put together unrelated graphs
+grid.arrange(g1 + ggtitle('a)'), g2 + ggtitle('b)'), nrow = 1)
+```
+
 
 # Summary figures
 
