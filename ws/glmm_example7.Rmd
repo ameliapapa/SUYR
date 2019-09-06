@@ -109,6 +109,9 @@ lung     a      15        16.6      4.074
 **SFREQBUC**   Square root transformed frequency of buccal breathing - the response variable
 -------------- ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
 
+
+### DID THE FREQUENCY OF BUCCAL BREATHING CHANGE WITH O2 CONCENTRATION
+
 # Read in the data
 
 ```{r readData, results='markdown', eval=TRUE}
@@ -116,6 +119,10 @@ mullens = read_csv('../data/mullens.csv', trim_ws=TRUE)
 glimpse(mullens)
 ```
 
+```{r}
+mullens = mullens %>% mutate(BREATH = factor(BREATH), TOAD = factor(TOAD))
+mullens = mullens %>% mutate(pBUC = FREQBUC/100, pzBUC = ifelse(pBUC==0,0.0001, pBUC)) #if the value of pBUC is zero, we replace is with 0.0001, because gamma distribution can't do zeros
+```
 
 # Exploratory data analysis
 
@@ -124,20 +131,83 @@ $$
 y_i \sim{} \mathcal{Pois}(\lambda_i)\\
 ln(\lambda_i) =\boldsymbol{\beta} \bf{X_i} + \boldsymbol{\gamma} \bf{Z_i}
 $$
+```{r}
+ggplot(mullens, aes(O2LEVEL, pzBUC, color = BREATH)) + geom_smooth() +
+  geom_point()
+#We will try to fit a linear model, with a nonlinear curve. It is still a linear combination of the betas, thus a linear model, despite the curve.
+```
 
 where $\boldsymbol{\beta}$ and $\boldsymbol{\gamma}$ are vectors of the fixed and random effects parameters respectively 
 and $\bf{X}$ is the model matrix representing the overall intercept and effects of copper, distance and their interaction on the number of number of worms.
 Area of the place segment was also incorporated as an offset.
 $\bf{Z}$ represents a cell means model matrix for the random intercepts associated with individual plates.
 
+
 # Fit the model
+
+```{r}
+library(glmmTMB)
+mullens.glmmTMB = glmmTMB(pzBUC ~ BREATH*poly(O2LEVEL,3) + (1|TOAD), 
+                          data = mullens, family = beta_family(link = "logit")) 
+#it will fit up to a third level polynomial
+#glm and glmer won't do beta. only glmmTMB uses beta_family
+#poly will fit a polynomial, but will make sure that the linear and quadratic components will be independent, and they can be measured independently
+
+mullens.glmmTMB1 = glmmTMB(pzBUC ~ BREATH*poly(scale(O2level), 3) +
+                             (poly(scale(O2level), 3)|TOAD), data = mullens, family = beta_family(link = "logit")
+```
 
 # Model validation
 
+```{r}
+ggplot() +
+  geom_point(data = NULL, aes(y = resid(mullens.glmmTMB), x = fitted(mullens.glmmTMB)))
+```
+
+
 # Model investigation / hypothesis testing
+
+```{r}
+summary(mullens.glmmTMB)
+#BREATHlung                   -0.85089    0.26809  -3.174   0.0015 ** 
+#It says they're a difference between buccal and lung, but only for a single oxygen levels. Doesn't hold true for all oxygen levels, it is not consistent because there are interactions
+#poly(O2LEVEL, 3)1            -6.37285    0.71828  -8.872  < 2e-16 ***
+#there is evidence of a declining trend for buccal breathers. but no evidence for quadratic or polynomial
+
+#BREATHlung:poly(O2LEVEL, 3)1 10.48385    1.45749   7.193 6.33e-13 ***
+#the lung breathers don't have the same linearity component as the buccal breathers.
+
+#The buccal breathers didn't have a quadratic component.
+#BREATHlung:poly(O2LEVEL, 3)2 -6.57740    1.32279  -4.972 6.61e-07 ***
+#The lung breathers have a different quadratic component different to that of buccal breathers. Because the buccal breathers don't have a quadratic component, the lung breathers will have it.
+#BREATHlung:poly(O2LEVEL, 3)3  3.04981    1.28491   2.374   0.0176 *  
+#Same argument goes for cubic. The buccal breathers didn't have a cubic component, but the lung breathers have a slight cubic component.
+
+```
+```{r}
+plot(allEffects(mullens.glmmTMB))
+```
 
 # Predictions
 
+```{r}
+emmeans(mullens.glmmTMB, ~O2LEVEL|BREATH, type = 'response')
+```
+
+```{r}
+mullens.grid = with(mullens, list(BREATH = levels(BREATH), 
+                                  O2LEVEL = seq(min(O2LEVEL), max(O2LEVEL), len = 100)))
+newdata = emmeans(mullens.glmmTMB, ~O2LEVEL|BREATH, at = mullens.grid, type = 'response') %>% as.data.frame()
+head(newdata)
+```
+
 # Summary figures
+
+```{r}
+ggplot() +
+  geom_ribbon(data =newdata, aes(ymin = lower.CL, ymax= upper.CL, x = O2LEVEL, fill = BREATH), alpha = 0.3) +
+  geom_line(data = newdata, aes(y = prop, x = O2LEVEL, color = BREATH)) +
+  theme_classic()
+```
 
 # References
