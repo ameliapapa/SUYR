@@ -50,9 +50,13 @@ knitr::opts_chunk$set(echo = TRUE, message=FALSE, warning=FALSE)
 Load the necessary libraries
 
 ```{r libraries, results='markdown', eval=TRUE}
-library(gbm)         #for gradient boosted models
-library(car)
-library(tidyverse)
+library(gbm)         #for gradient boosted models. getting lots of trees, each one shrunk and explains only a tiny amount. loads of them explain tons
+library(car)         
+library(dismo)
+library(pdp)
+library(ggfortify)   #coverts from one format to another. 
+library(randomForest)
+library(tidyverse)   #its worth putting it last
 ```
 
 # Scenario
@@ -76,41 +80,83 @@ Format of abalone.csv data file
 # Read in the data
 
 ```{r readData, results='markdown', eval=TRUE}
+library(readr)
 abalone = read_csv('../data/abalone.csv', trim_ws=TRUE)
 glimpse(abalone)
 ```
+Which of these variables predict the age of abalone the best?
 
+```{r}
+abalone = abalone%>% mutate(SEX = factor(SEX)) 
+```
 
 
 # Exploratory data analysis
+```{r}
+ggplot(abalone) +
+  geom_point(aes(y=AGE, x = RINGS))
+```
 
+```{r}
+scatterplotMatrix(~RINGS + SEX + LENGTH + DIAMETER + HEIGHT+ WHOLE_WEIGHT + MEAT_WEIGHT + GUT_WEIGHT + SHELL_WEIGHT, data = abalone)
+# It looks at the trends between the response and the predictors. 
+#SEX is categorical, so we don't want to impose any monitonical relationship
+#LENGTH is positive
+```
 
+- Some of the predictors are correlated -> HOW?
+- RINGS -> POISSON -> determines the 'lost' function
+                      Because you're only looking for the lost function, you don't need to worry about NB
+                      
+- You don't need to worry about the distribution of the predictors. The predictors never need to be transformed. It doesn't matter how big the gaps are, the data is going to be split anyway.
+- You don't need to scale variables...
+- You don't need to worry about linearity or homogeneity of variance...
 
-# Fit the model
+# Subsetting the data
 
 ```{r fitModel, results='markdown', eval=TRUE}
-set.seed(123)
-nrow(abalone)
-i = sample(1:nrow(abalone), 100,replace=FALSE)
-abalone.train = abalone[-i,]
-abalone.test = abalone[i,]
+set.seed(123)# sets a random seed, that is reproducable. 123rd point in the list of random numbers. 
 
-abalone.gbm = gbm(RINGS ~ SEX + LENGTH + DIAMETER + HEIGHT +
-                      WHOLE_WEIGHT + MEAT_WEIGHT + GUT_WEIGHT +
-                      SHELL_WEIGHT,
-                  data=abalone.train,
-                  distribution='poisson',
-                  var.monotone=c(0,1,1,1,1,1,1,1),
-                  n.trees=10000,
-                  interaction.depth=5,
-                  bag.fraction=0.5,
-                  shrinkage=0.01,
-                  train.fraction=1,
-                  cv.folds=3)
-(best.iter = gbm.perf(abalone.gbm,method='OOB'))
+nrow(abalone) #I'm curious to know how many rows are in the data, to know how to divide the test and training tests
+i = sample(1:nrow(abalone), 100,replace=FALSE) #withhold 100 values to test precision
+#sample is a function that randomly samples, and we've asked to sample without replacement, so we don't get duplicates
+i %>% head
+
+abalone.train = abalone[-i,] #take abalone data, and don't include the row with the "i" subset
+#include all but... (negative means don't include these rows). Subsets by using indices. A dataset has rows and columns, and you can infer to each of those. 
+#abalone[1,] first row, all columns
+#abalone[,1] first column, all rows
+abalone.test = abalone[i,] # only include "i" subset
+```
+
+
+## Fit the model
+```{r fitModel, results='markdown', eval=T, cache=T}
+#cache -> everytime you're kniting, it saves the long chunks, and it doens't do it again and again.
+abalone.gbm = gbm(RINGS ~ SEX + LENGTH + DIAMETER + HEIGHT + #declare gradient boosted model
+                      WHOLE_WEIGHT + MEAT_WEIGHT + GUT_WEIGHT + #predictors
+                      SHELL_WEIGHT, 
+                  data=abalone.train, #where predictors come from
+                  distribution='poisson', #determines the loss function
+                  var.monotone=c(0,1,1,1,1,1,1,1), #SEX is categorical, so we don't impose any monitonical relationship, but the rest of the responses are positive
+                  n.trees=10000, #we determine later, if this is a good number
+                  interaction.depth=5, #5 split levels, you inspect there might be 3 way interactions. If there's 7,you potentially support 5 way interactions. This is purely observations from others. Each additional depth slows down the model
+                  bag.fraction=0.5, #on any give tree it will use a random 50% of the data. 
+                  shrinkage=0.01, #the learning rate, the shrinkage. the lower the number, the slower it learns, and the more tree you need to learn the stuff. If you decrease shrinkage, you should increase number of trees.
+                  train.fraction=1, #use all of the data
+                  cv.folds=3) #use 3 CV folds. It will repeat each tree 3 times. The more you do the better, but there needs to be a balance with how long it is going to take.
+
+``` 
+
+
+```{}
+(best.iter = gbm.perf(abalone.gbm,method='OOB')) #out of bag
 (best.iter = gbm.perf(abalone.gbm,method='cv'))
 summary(abalone.gbm, n.trees=best.iter)
 
+```
+
+```{}
 plot(abalone.gbm, 8, n.tree=best.iter)
 
 par(mfrow=c(2,4))
