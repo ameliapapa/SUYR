@@ -3,6 +3,22 @@ title: "GLMM Part1"
 author: "Murray Logan"
 date: "`r format(Sys.time(), '%d %B, %Y')`"
 output:
+  word_document:
+    fig_caption: yes
+    fig_height: 4
+    fig_width: 4
+    highlight: tango
+    toc: yes
+    toc_depth: 2
+  pdf_document:
+    df_print: default
+    fig_caption: yes
+    fig_height: 4
+    fig_width: 4
+    highlight: tango
+    latex_engine: xelatex
+    number_sections: yes
+    toc_depth: 2
   html_document:
     code_folding: show
     collapse: no
@@ -15,22 +31,6 @@ output:
     toc: yes
     toc_float: yes
     css: ../resources/style.css
-  pdf_document:
-    df_print: default
-    fig_caption: yes
-    fig_height: 4
-    fig_width: 4
-    highlight: tango
-    latex_engine: xelatex
-    number_sections: yes
-    toc_depth: 2
-  word_document:
-    fig_caption: yes
-    fig_height: 4
-    fig_width: 4
-    highlight: tango
-    toc: yes
-    toc_depth: 2
 output_dir: "docs"
 documentclass: article
 fontsize: 12pt
@@ -193,7 +193,7 @@ ggplot(newdata, aes(TREATMENT, emmean)) + geom_pointrange(aes(ymin = lower.CL, y
 ##NEW WAY
 - Deals with temporal and spatial autocorrelation
 - Optimization agent is better
-- Allows for interaction between interactions between fixed and random effects, but you rarely encounter this scenario
+- Allows for interaction between fixed and random effects, but you rarely encounter this scenario
 
 ```{r}
 library(lme4)

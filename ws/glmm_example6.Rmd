@@ -136,7 +136,7 @@ copper = copper %>% mutate(COPPER = factor(COPPER), PLATE = factor(PLATE), DIST 
 
 ```{r}
 ggplot(copper, aes(y = WORMS, x= DIST, fill = COPPER)) + 
-  geom_boxplot()
+  geom_boxplot() 
 ggplot(copper, aes(y = WORMS, x= DIST, fill = COPPER)) +
   geom_boxplot() +
   scale_y_log10()
