@@ -87,8 +87,9 @@ The aim of the analysis is to investigate the relationship between fertilizer co
 # Read in the data
 
 ```{r readData, results='markdown', eval=TRUE}
+library(readr)
 fert = read_csv('../data/fertilizer.csv', trim_ws=TRUE)
-glimpse(fert)
+head(fert)
 ```
 
 
