@@ -109,11 +109,61 @@ OR\\
 \end{align}
 $$
 
+- Weakly informative priors
+  A null prior says any value is possible. We don't almost never want that to be the case. If you allow your prior to be null, you can get nonsense.
+  
+- The prior on our intercept is a large distribution, centred around zero.
+- We will check that they're not influential.
+- a half cauchy is something you used to estimate variance, and it is cut in half because it assumes that it doesn't make sense to be less than zero.
+
+
 # Fit the model
 
-
+```{r}
+summary(lm(YIELD ~ FERTILIZER, data = fert)) #Frequentist
+```
 
 [https://github.com/stan-dev/stan/wiki/Prior-Choice-Recommendations]
+
+```{r}
+fert.rstanarm = stan_glm(YIELD ~ FERTILIZER, data = fert, iter = 5000, warmup = 500, chains = 3, thin = 2, refresh = 0) #after which iteration should i give you an update of where I'm up to. 0 means give me no updates.
+```
+
+```{r}
+prior_summary(fert.rstanarm)
+#Centred data helps to give the intercept some meaning, simplifies calculations
+#Our priors for the intercept are a gaussian 0|10 and for the slope the priors are a gaussian 0|2.5.
+#It didn't use a cauchy, but an exponential (rate=1)
+```
+
+First time you run the model:
+```{r}
+fert.rstanopt = stan_glm(YIELD ~ FERTILIZER, data = fert,
+                         algorithm = 'optimizing') 
+prior_summary(fert.rstanopt)
+```
+
+```{r}
+fert.rstanarm = stan_glm(YIELD ~ FERTILIZER, data = fert, iter = 5000, 
+                         warmup = 500, chains = 3, thin = 2, refresh = 0,
+                         prior_intercept = normal(0,100,autoscale = F),
+                         prior = norma(0,10, autoscale = F),
+                         prior_aux = cauchy(0,5, autoscale = F))
+posterior_vs_prior(fert.rstanarm, color_by = 'vs', group_by = T,
+                   facet_args = list(scales = 'free_y'))
+#you want the priors (in blue), to be larger that the posterior. This implies they were adequetly vague. If they're way to wide, you encourage it to sample wrong values
+```
+
+#Diagnostics
+```{r}
+stan_trace(fert.rstanarm)
+#By default is giving us our main effects. We asked for three chains, which are in three colors. They are all random noise, as we want them. It would be bad if any of the colors are above/below. The chains are well mixed. It has replicated the entire likelihood.
+```
+
+```{r}
+stan_dens(fert.rstanarm, separate_chains = T)
+#If we have very large priors, it will reject 
+```
 
 
 # Model validation
