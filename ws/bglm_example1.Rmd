@@ -147,7 +147,7 @@ prior_summary(fert.rstanopt)
 fert.rstanarm = stan_glm(YIELD ~ FERTILIZER, data = fert, iter = 5000, 
                          warmup = 500, chains = 3, thin = 2, refresh = 0,
                          prior_intercept = normal(0,100,autoscale = F),
-                         prior = norma(0,10, autoscale = F),
+                         prior = normal(0,10, autoscale = F),
                          prior_aux = cauchy(0,5, autoscale = F))
 posterior_vs_prior(fert.rstanarm, color_by = 'vs', group_by = T,
                    facet_args = list(scales = 'free_y'))
@@ -162,19 +162,32 @@ stan_trace(fert.rstanarm)
 
 ```{r}
 stan_dens(fert.rstanarm, separate_chains = T)
-#If we have very large priors, it will reject 
+```
+
+```{r}
+#Diagnostics:
+
+stan_trace(fert.rstanarm)
+stan_dens(fert.rstanarm, separate_chains = T)
+stan_ess(fert.rstanarm)
+stan_ac(fert.rstanarm) #the chains were all well mixed and converged from a stable posterior
+# converged -> they gave the same thing
+# All Rhat values were below 1.05. If not, you have a lot of duplicates, rather than estimates.
+
+pp_check(fert.rstanarm) # Each blue line represents one realisation of MCMC sample. They look very similar. If not, then the sampler wouldn’t be sampling the right thing.
+
+
+#Posterior checks:
+#pp_check(fert.rstanarm, plot_fun = ‘scatter’)
+pp_check(fert.rstanarm, plot_fun = 'error_scatter_avg') 
+# you want to see a scatter of points. If there’s a trend, then it means the model is better at predicting certain values, rather than others. It should be equally good at predicting at the whole range
+
+#pp_check(fert.rstanarm, x = fert$FERTILIZER, plot_fun = ‘error_scatter_avg_vs_x’)
+
 ```
 
 
-# Model validation
-
-
-
-
 # Model investigation / hypothesis testing
-
-
-
 
 
 ```{r mcmcpvalue, results='markdown', eval=TRUE}
@@ -200,15 +213,69 @@ mcmcpvalue <- function(samp)
     }
     
 }
+
+mcmcpvalue(as.matrix(fert.rstanarm)[,c("FERTILIZER")])
+```
+
+```{r}
+fert.mcmc = as.matrix(fert.rstanarm)
+nrow(fert.mcmc)
+```
+```{r}
+head(fert.mcmc)
+```
+```{r}
+mean(fert.mcmc[,'FERTILIZER']) #the mean of the column called FERTILIZER which was our slope. this is the same value we got from the summary table. This is also the best estimate of the slope
+```
+
+What is the probability that the slope is greater than 0.81? 50%
+```{r}
+sum(fert.mcmc[,'FERTILIZER']>0.811913)/6750
+```
+
+The probability that it is below? 50%
+```{r}
+sum(fert.mcmc[,'FERTILIZER']<0.811913)/6750
 ```
 
 
-
-# Predictions
-
+We can now reproduce the distribution:
+```{r}
+hist(fert.mcmc[,'FERTILIZER'])
+#this is our distribution of all possible slopes
+```
 
 
 # Summary figures
+```{r}
+resid = resid(fert.rstanarm)
+fit = fitted(fert.rstanarm)
+ggplot() + geom_point(data = NULL, aes( y = resid, x = fit))
+```
+
+```{r}
+ggpredict(fert.rstanarm) %>% plot
+#its like plotting allEffects
+```
+
+```{r}
+summary(fert.rstanarm)
+#6750 samples (posterior sample size) 4500 per each chain, we thin by 2 (4500*3/2 = 6750)
+#97.5 and 2.5 make up the 95% credibility intervals. We're 95% sure that the intercept is between 23.3 and 78.6. We're 50% sure it's between 42.5 and 60. The intercept still doesn't have any meaning tho.
+
+#We can be 95% sure that the true slope is between 0.6 and 1.0. Because it doesn't include 0, 
+
+#Diagnostics:
+#Rhat values are less than 1.05 for each of the variables
+#Out of 6750 posterior samples, 5592 of them are effective (unique/unrepeated). You want to have at least a 1000 unique samples, from which to get credibility samples.
+
+#Estimates of variance
+```
+
+```{r}
+tidyMCMC(fert.rstanarm, conf.int = T, conf.method = 'HPDinterval')
+#the estimate is by default the mean, but you can change this
+```
 
 
 # References
