@@ -152,8 +152,9 @@ abalone.gbm = gbm(RINGS ~ SEX + LENGTH + DIAMETER + HEIGHT + #declare gradient b
 ```{}
 (best.iter = gbm.perf(abalone.gbm,method='OOB')) #out of bag
 (best.iter = gbm.perf(abalone.gbm,method='cv'))
-summary(abalone.gbm, n.trees=best.iter)
+#it stored the result as a variable, when we ask it 
 
+summary(abalone.gbm, n.trees=best.iter)
 ```
 
 ```{}
