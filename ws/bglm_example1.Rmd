@@ -278,6 +278,86 @@ tidyMCMC(fert.rstanarm, conf.int = T, conf.method = 'HPDinterval')
 ```
 
 
+#What if we wanted to know, what the benefit would be from doubling the amount of fertilizer from 100 to 200?
+
+```{r}
+fert.grid =with(fert, list(FERTILIZER = c(100,200)))
+emmeans(fert.rstanarm, pairwise~FERTILIZER, at = fert.grid)$contrast %>% as.data.frame
+#It subtracted 6750 predictions of 100 to 6750 predictions of 200, to give us the difference.
+#We allowed it to do 
+```
+
+```{r}
+emmeans(fert.rstanarm, ~FERTILIZER, at = fert.grid) %>%
+  gather_emmeans_draws() %>% head
+#we asked emmeans to pull out the draws of 100 from the distribution
+#rather than spitting 6750 predictions in the screen, we ask for the first 6(head)
+```
+
+```{r}
+mcmc = emmeans(fert.rstanarm, ~FERTILIZER, at = fert.grid) %>%
+  gather_emmeans_draws() %>% 
+  spread(key = FERTILIZER, value = .value)
+head(mcmc)
+```
+```{r}
+mcmc.1 = mcmc %>% mutate(Eff=`200`-`100`, PEff = 100*(`200`-`100`)/`100`)
+#PEff expresses the proportion of increase in percentage
+head(mcmc.1)
+```
+
+```{r}
+mean(mcmc.1$Eff)
+#on average, the gain in yield is 81 units if we increased from 100 to 200
+
+mean(mcmc.1$PEff) #represents a 61% increase
+
+mcmc.1 %>% mean_hdi(Eff) #calculates mean and highest probability density
+#we can be 95% confident, that if we increase FERTILIZER from 100 to 200, the yield increase would be from 62.4 to 98.34
+```
+
+
+#What is the probability, that if I increase my fertilizer from 100-200, I get an increase in yield greater than 50%?
+```{r}
+mcmc.1 %>% summarize(Prob=sum(PEff>50)/n()) #91%
+```
+
+#Summary figures
+```{r}
+fert.list = with(fert, list(FERTILIZER = seq(min(FERTILIZER), max(FERTILIZER), LEN = 100)))
+newdata = emmeans(fert.rstanarm, ~FERTILIZER, at = fert.list) %>% as.data.frame
+
+ggplot(newdata, aes(y = emmean, x = FERTILIZER)) +
+  geom_point(data = fert, aes(y = YIELD)) +
+  geom_line() +
+  geom_ribbon(aes(ymin=lower.HPD, ymax=upper.HPD), fill = 'blue', alpha = 0.3) +
+  theme_classic()
+```
+
+
+#R squared
+```{r}
+fert.r2 = bayes_R2(fert.rstanarm)
+hist(fert.r2)
+fert.r2 %>% median_hdi 
+#we use a function to calculate a bayesian r2 value. there's not a single R2 value, rather a distribution. 
+#median value = 0.919784
+#we're 95% sure that the r squared value is between .84 and .92
+```
+
+
+```{r}
+(full=loo(fert.rstanarm))
+#AIC is not as good for Bayesian
+#Leave one out Information Criteria : LOO
+#If it decides that more than 30% of your observations are bad, it will to rerun the model
+```
+
+```{r}
+waic(fert.rstanarm)
+```
+
+
 # References
 
                                  
