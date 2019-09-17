@@ -155,6 +155,7 @@ abalone.gbm = gbm(RINGS ~ SEX + LENGTH + DIAMETER + HEIGHT + #declare gradient b
 #it stored the result as a variable, when we ask it 
 
 summary(abalone.gbm, n.trees=best.iter)
+#the biggest predictor of age, is shell weight. Shell weight involved 86% of the splits. 6% of the splits were HEIGHT, etc... If you add up all of the importances, they add up to 100. If they were equally important, you would expect 100/8 importance. If the relative importance is lower than 12.5, is really not important. 
 ```
 
 ```{}
