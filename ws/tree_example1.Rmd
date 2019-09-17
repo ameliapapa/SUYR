@@ -146,11 +146,8 @@ abalone.gbm = gbm(RINGS ~ SEX + LENGTH + DIAMETER + HEIGHT + #declare gradient b
                   train.fraction=1, #use all of the data
                   cv.folds=3) #use 3 CV folds. It will repeat each tree 3 times. The more you do the better, but there needs to be a balance with how long it is going to take.
 
-``` 
-
-
-```{}
 (best.iter = gbm.perf(abalone.gbm,method='OOB')) #out of bag
+
 (best.iter = gbm.perf(abalone.gbm,method='cv'))
 #it stored the result as a variable, when we ask it 
 
@@ -158,68 +155,149 @@ summary(abalone.gbm, n.trees=best.iter)
 #the biggest predictor of age, is shell weight. Shell weight involved 86% of the splits. 6% of the splits were HEIGHT, etc... If you add up all of the importances, they add up to 100. If they were equally important, you would expect 100/8 importance. If the relative importance is lower than 12.5, is really not important. 
 ```
 
-```{}
+```{r}
 plot(abalone.gbm, 8, n.tree=best.iter)
 
 par(mfrow=c(2,4))
 for (i in 1:8) plot(abalone.gbm, i, n.tree=best.iter)
+```
 
+```{r}
 library(pdp)
 library(ggfortify)
 ## recursive indicates that a weighted tree traversal method described by Friedman 2001 (which is very fast)
 ## should be used (only works for gbm).  Otherwise a slower brute force method is used.
 ## if want to back transform - need to use brute force.
-abalone.gbm %>% partial(pred.var='SHELL_WEIGHT',
-                        n.trees=best.iter) %>%
-    autoplot()
-abalone.gbm %>% partial(pred.var='SHELL_WEIGHT',
+abalone.gbm %>% pdp::partial(pred.var='SHELL_WEIGHT',
+                        n.trees=best.iter) %>% autoplot()
+#tidyverse being loaded last, has a function called 'purrr' that overwrites 'partial' of pdp. We need to tell r to use partial from the package pdp, instead of purrr.
+
+```
+
+
+```{r}
+#Rather than plotting the partial plot in the log scale, we perform the inverse, and put it back on our natural scale
+abalone.gbm %>% pdp::partial(pred.var='SHELL_WEIGHT',
                         n.trees=best.iter,
                         recursive=FALSE,
                         inv.link=exp) %>%
     autoplot()
+#if there's missing values, the whole rows goes out. Regression trees try to predict the missing data, depending on what's already there. 
 
-abalone.gbm %>% partial(pred.var=c('SHELL_WEIGHT','MEAT_WEIGHT'),
+#Prediction 
+```
+
+```{r}
+abalone.gbm %>% pdp::partial(pred.var=c('SHELL_WEIGHT','MEAT_WEIGHT'),
                         n.trees=best.iter) %>%
-    autoplot()
+    autoplot() #heat map
+```
 
+```{r}
 grid.arrange(
-    abalone.gbm %>% partial(pred.var='SHELL_WEIGHT', n.trees=best.iter,
+    abalone.gbm %>% pdp::partial(pred.var='SHELL_WEIGHT', n.trees=best.iter,
                             recursive=FALSE,inv.link=exp) %>%
     autoplot,
-    abalone.gbm %>% partial(pred.var='MEAT_WEIGHT', n.trees=best.iter,
+    abalone.gbm %>% pdp::partial(pred.var='HEIGHT', n.trees=best.iter,
                             recursive=FALSE,inv.link=exp) %>%
-    autoplot)
-##note, these are still on the log scale
+    autoplot) 
 
+#Alternatively:
+#g1 = abalone.gbm %>% pdp::partial(pred.var='SHELL_WEIGHT', n.trees=best.iter,
+#                            recursive=FALSE,inv.link=exp) %>%
+#    autoplot
+#g2 = abalone.gbm %>% pdp::partial(pred.var='HEIGHT', n.trees=best.iter,
+#                            recursive=FALSE,inv.link=exp) %>%
+#    autoplot
+#grid.arrange(g1,g2, nrow = 1)
+```
+
+
+#Predictions
+
+```{r}
 predict(abalone.gbm,newdata=abalone.test, n.tree=best.iter, type='response')
+#we've largely ignored the predict function, because it often doesn't provide standard errors to get CI's. 
+#But if we just wanted predicted values, it is fine
+```
 
-newdata = abalone.train
+```{r}
+cbind(
+  predict(abalone.gbm, newdata = abalone.test, n.tree = best.iter, type = 'response'), abalone.test$RINGS
+)
+```
+```{r}
+cbind(
+  predict(abalone.gbm, newdata = abalone.test, n.tree = best.iter, type = 'response'), abalone.test$RINGS
+) %>% plot #Predicted in x, and observed in y
+```
 
-newdata = cbind(abalone.train,
-    fit=predict(abalone.gbm,newdata=abalone.train, n.tree=best.iter, type='response'))
+
+
+```{r} 
+##Predictions are on the x axis, instead of the y axis
+newdata = abalone.test
+
+newdata = cbind(abalone.test,
+    fit=predict(abalone.gbm,newdata=abalone.test, n.tree=best.iter, type='response'))
 ggplot(newdata, aes(y=fit, x=RINGS)) + geom_point()
 
+```
+
+
+```{r}
+##SAME HERE
 newdata = abalone.test %>%
     mutate(fit=predict(abalone.gbm, newdata=abalone.test,
                        n.tree=best.iter, type='response'))
 ggplot(newdata, aes(y=fit, x=RINGS)) + geom_point()
     
+```
+
+#Confidence intervals on regression trees:
+- We want to project the uncertainty in our outcomes
+1. If we can get access to what the CV data saw in every tree, then we can get uncertainty. Because the tree was repeated three times. Unfortunately, gbm doesn't giv us this. ABT gets access to these bits, but Glenn De'ath had a falling out with CRAN, so you can contact him
+2. Bootstrapping -> 
+
+
+```{r}
 summary(lm(fit ~ RINGS, data=newdata))
 
+```
+
+```{r}
 newdata.1 = cbind(abalone.test,
                   fit=predict(abalone.gbm, newdata=abalone.test, n.tree=best.iter, type='response'))
 ggplot(newdata, aes(y=fit, x=RINGS)) + geom_point() +
     geom_point(data=newdata.1, color='red', size=5)
+```
 
 
+```{r}
 
 ##Computes Friedman's H-statistic to assess the strength of variable interactions.
 interact.gbm(abalone.gbm, abalone,5:6, n.tree=best.iter)
+#[1] 2.02862e-13 Interaction between 4 and 8
+interact.gbm(abalone.gbm, abalone,c(4,8), n.tree=best.iter)
+#[1] 0.06572818 Interaction between 4 and 8
+```
 
-terms <- attr(abalone.gbm$Terms,"term.labels")
-abalone.int <- NULL
-for (i in 1:(length(terms)-1)) {
- for (j in (i+1):length(terms)) {
+```{r}
+terms <- attr(abalone.gbm$Terms,"term.labels") #terms are the names of your predictors. 
+terms
+#we use this for our loop
+```
+
+
+```{r}
+abalone.int <- NULL #to collect interactions, we need the variable to be empty
+
+#we're looking for every two way interaction
+for (i in 1:(length(terms)-1)) { #'i' is used as a counter (iteration number), 'in' means the first time we run this loop i is equal to 1
+#we want it to go from 1-7 (length=8). 
+ for (j in (i+1):length(terms)) { #another nested loop inside, so we need a new counter 'j'. we want it to start one beyond what we had for i. It starts at whatever i was, and will go until 8. 
+   print(paste('i=',i, 'Name = ', terms[i]))
+   print(paste('j=',j, 'Name = ', terms[j]))
    abalone.int <- rbind(abalone.int,
         data.frame(Var1=terms[i], Var2=terms[j],
   "H.stat"=interact.gbm(abalone.gbm, abalone,c(i,j),
@@ -227,10 +305,21 @@ for (i in 1:(length(terms)-1)) {
                    ))
  }
 }
-abalone.int %>% arrange(-H.stat)
+```
+
+
+```{r}
+abalone.int %>% arrange(-H.stat) #we put them in order to the highest is in the top. This way we see which interaction was the strongest.
+#The strongets interaction was between SEX and HEIGHT, but we decided they were not very useful
+```
+
+```{r}
 terms
 plot(abalone.gbm, c(5,6), n.tree=best.iter)
+```
 
+
+```{r}
 abalone.grid = plot(abalone.gbm, c(5,6), n.tree=best.iter, return.grid=TRUE)
 head(abalone.grid)
 
@@ -238,16 +327,72 @@ ggplot(abalone.grid, aes(y=MEAT_WEIGHT, x=WHOLE_WEIGHT)) +
     geom_tile(aes(fill=y)) +
     geom_contour(aes(z=y)) +
     scale_fill_gradientn(colors=heat.colors(10))
+```
 
+
+```{r}
 ### gbm.step
 library(dismo)
 abalone.gbm1 <- gbm.step(data=abalone %>% as.data.frame, gbm.x=1:8, gbm.y=9,
+                         #it needs a dataframe and can't use the tibble
+                         #our predictors are in column 1-8 and the response                           is in column 9
                         tree.complexity=5,
                         learning.rate=0.01,
                         bag.fraction=0.5,
                         n.trees=10000,
                         family='poisson')
 summary(abalone.gbm1)
+#In the presence and absence of each variable, SHELL_WEIGHT and MEAT_WEIGHT show most influential
+```
+
+ALternatively
+for (i in c(0.1,0.01)) {
+abalone.gbm1 <- gbm.step(data=abalone %>% as.data.frame, gbm.x=1:8, gbm.y=9,
+                         #it needs a dataframe and can't use the tibble
+                         #our predictors are in column 1-8 and the response                           is in column 9
+                        tree.complexity=5,
+                        learning.rate=0.01,
+                        bag.fraction=0.5,
+                        shrinkage = i
+                        n.trees=10000,
+                        family='poisson')
+}
+
+
+### RANDOM FOREST
+- A boosted tree subsets the rows. It always has the same number of predictors, but it has a different combination of rows each time
+- A random forest, uses the same # of rows, but different # of predictors
+- Individually they have different importances than in boosted tree. In random forest, they will get half the importance.
+```{r}
+abalone.rf = randomForest(RINGS ~ SEX + LENGTH+ DIAMETER + HEIGHT +
+                            WHOLE_WEIGHT + MEAT_WEIGHT + GUT_WEIGHT +
+                            SHELL_WEIGHT,
+                          data = abalone.train,
+                          distributions = 'poisson',
+                          var.monotone = c(0,1,1,1,1,1,1,1),
+                          n.trees = 10000,
+                          interaction.depth = 5,
+                          bag.fraction = 0.5,
+                          shrinkage = i,
+                          train.fraction = 1,
+                          cv.folds = 3)
+library(randomForest)
+abalone.rf = randomForest(RINGS ~ SEX + LENGTH + DIAMETER + HEIGHT +
+                            WHOLE_WEIGHT + MEAT_WEIGHT + GUT_WEIGHT + 
+                            SHELL_WEIGHT, data = abalone.train, importance = T, ntree = 10000)
+
+abalone.imp = importance(abalone.rf)
+100*abalone.imp/sum(abalone.imp)
+#If you were to even out the importances with random forest, SHELL_WEIGHT doesn't stick out as a massively important predictor. Because they are highly correlated, they are evened out. SEX wasn't correlated to any of the other, so a weak importance was observed. 
+```
+
+```{r}
+library(pdp)
+abalone.rf %>% pdp::partial('SHELL_WEIGHT') %>% autoplot
+```
+
+
+```{r}
 gbm.plot(abalone.gbm1, n.plots=8, write.title = FALSE)
 gbm.plot.fits(abalone.gbm1)
 find.int <- gbm.interactions(abalone.gbm1)
@@ -256,9 +401,6 @@ find.int$rank.list
 gbm.perspec(abalone.gbm1,6,5)
 
 ```
-
-
-
 
 
 # Model validation
