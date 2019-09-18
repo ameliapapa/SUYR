@@ -109,20 +109,157 @@ ln\left(\frac{p_i}{1-p_i}\right) &= \beta_0 + \beta_1 x_i\\
 \end{align}
 $$
 
+
 # Fit the model
 
+```{r}
+polis.rstanopt = stan_glm(PA ~ RATIO, data = polis,
+                         algorithm = 'optimizing') 
+prior_summary(polis.rstanopt)
+#this doesn't go through the sampling routine, it only does the optimizing and gives us a chance to see what might be a useful prior, without giving us the full model
 
+#It says 0|10 and 0|2.5. 
+#However, it is important to set priors ourselves. 
+
+summary(polis.rstanopt)
+#We get a quick idea if the model is a reasonable model. It has the estimated median and sd, and 95% confidence intervals
+```
+
+
+```{r}
+polis.rstanarm = stan_glm(PA~RATIO, data = polis, family = binomial(), 
+iter = 5000, warmup = 500, chains = 3, thin = 2, refresh = 0)
+```
+
+We now start building our model using the prior on the intercept and the prior on our slope:
+
+```{r fitModel, cache=T}
+polis.rstanarm = stan_glm(PA~RATIO, data = polis, family = binomial(), 
+iter = 5000, warmup = 500, chains = 3, thin = 2, refresh = 0,
+prior_intercept = normal(0,10, autoscale = F),
+prior = normal(0,1, autoscale = F))
+
+save(polis.rstanarm, file = '../data/polis.rstanarm.RData')
+```
+
+Were our priors overly influential? Were the chains well mixed?
 
 # Model validation
+
+```{r}
+load(file = '../data/polis.rstanarm.RData')
+posterior_vs_prior(polis.rstanarm, color_by = 'vs', group_by = T,
+                   facet_args = list(scales='free_y'))
+```
+
+The priors are far far wider than the posteriors, therefore they're not being influential. They're sufficiently vague, and thus not influenting what the posterior should be.
+
+```{r}
+stan_trace(polis.rstanarm)
+```
+```{r}
+stan_ess(polis.rstanarm)
+#concerned if the engine was efficiently working
+```
+
+```{r}
+stan_rhat(polis.rstanarm)
+#concerned with what the estimates might be
+```
+
+
+Although both the rhat and ESS are concerned with different things, the solution for both of them is to thin the priors.
+
+```{r}
+stan_ac(polis.rstanarm)
+```
+
+If we increase the thinning, there will be less lag. For example, if we go from thin = 2 to thin = 4.
+
+```{r}
+pp_check(polis.rstanarm, x = polis$RATIO, plotfun = 'error_scatter_avg_vs_x')
+#this is a proximate residual plot
+```
+
+```{r}
+resid = residuals(polis.rstanarm)
+fit = fitted(polis.rstanarm)
+ggplot(data = NULL) + geom_point(aes(y=resid, x = fit))
+```
 
 
 # Model investigation / hypothesis testing
 
+```{r}
+ggpredict(polis.rstanarm) %>% plot
+```
 
 
-# Predictions
+```{r}
+ggemmeans(polis.rstanarm, ~RATIO) %>% plot
+```
+
+```{r}
+tidyMCMC(polis.rstanarm$stanfit, conf.int = T, conf.method = 'HPDinterval', rhat = T, ess = T)
+```
+
+```{r}
+polis.r2 = bayes_R2(polis.rstanarm)
+hist(polis.r2)
+```
+
+```{r}
+polis.r2 %>% median_hdi
+```
+
+
+#Predictions
+
+We can also extract these high probability density intervals manually:
+
+```{r}
+polis.mcmc = as.matrix(polis.rstanarm)
+nrow(polis.mcmc) #3375
+head(polis.mcmc) #and we can ask any question we want from this
+```
+
+```{r}
+hist(polis.mcmc[,'RATIO'])
+```
+
+
+Backtransformed into an odds ratio scale:
+
+```{r}
+hist(exp(polis.mcmc[,'RATIO']))
+```
+
+```{r}
+exp(polis.mcmc[,'RATIO']) %>% median_hdi
+```
+
+For every 1 unit change in RATIO, we have a 23% change.
+It was in a log ratio scale, and after the back transform y=0.77 is not additive, but multiplicative.
+
 
 # Summary figures
+
+```{r}
+polis.list= with(polis, list(RATIO = seq(min(RATIO), max(RATIO), len = 100)))
+newdata = emmeans(polis.rstanarm, ~RATIO, at = polis.list, type = 'response') %>% as.data.frame
+head(newdata)
+```
+
+```{r}
+ggplot(newdata, aes(y = prob, x = RATIO)) +
+  geom_point(data = polis, aes(y=PA)) +
+  geom_line() +
+  geom_ribbon(aes(ymin = lower.HPD, ymax = upper.HPD), fill = 'blue', alpha = 0.3) +
+  scale_y_continuous('PA') +
+  scale_x_continuous('RATIO') +
+  theme_classic()
+```
+
 
 
 # References
