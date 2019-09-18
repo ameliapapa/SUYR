@@ -59,6 +59,7 @@ library(broom)      #for tidying outputs
 library(tidybayes)  #for more tidying outputs
 library(ggeffects)  #for partial plots
 library(tidyverse)  #for data wrangling etc
+library(car)
 ```
 
 # Scenario
@@ -95,6 +96,11 @@ loyn = read_csv('../data/loyn.csv', trim_ws=TRUE)
 glimpse(loyn)
 ```
 
+```{r}
+loyn = loyn %>% mutate(fGRAZE = factor(GRAZE)) #adding to the dataset 
+```
+
+
 # Exploratory data analysis
 
 Model formula:
@@ -107,16 +113,137 @@ where $\boldsymbol{\beta}$ is a vector of effects parameters and $\bf{X}$ is a m
 the scaled versions of distance (ln), distance to the nearest large patch (ln), patch area (ln), grazing intensity, year of isolation and 
 altitude on the abundance of forest birds.
 
+```{r}
+scatterplotMatrix(~ABUND+DIST+LDIST+AREA+fGRAZE+ALT+YR.ISOL, data = loyn,
+                  diagonal = list(method = 'boxplot'))
+#We need to transform DIST, LDIST and AREA 
+```
+
+```{r}
+scatterplotMatrix(~ABUND+log(DIST)+log(LDIST)+log(AREA)+fGRAZE+ALT+YR.ISOL, data = loyn,
+                  diagonal = list(method = 'boxplot'))
+#Collinearity -> multiple variables correlated
+#Variance inflation in frequentist, doesn't exist in bayesian. You could look at colinearity instead, or do the frequentist version to check variance inflation.
+```
+
+```{r}
+loyn.lm = lm(ABUND ~ scale(log(DIST)) + scale(log(DIST)) + scale(log(AREA)) + fGRAZE + scale(ALT) + scale(YR.ISOL), data =  loyn)
+vif(loyn.lm) #checks variance inflation. We're looking for the values to be less than 3. Categorical variables are like a set of dummy variables. So we get two columns, because the function corrects for the fact that we have categorical variables. So we are only interested in the right column.
+
+#We scale because...
+```
+
+Why is the normal distribution appropriate?
+
 # Fit model
 
+```{r}
+loyn.rstanarnm = stan_glm(ABUND ~ scale(log(DIST)) + 
+                            scale(log(LDIST)) +
+                            scale(log(AREA)) +
+                            fGRAZE +
+                            scale(ALT) +
+                            scale(YR.ISOL), data = loyn,
+                          family = 'gaussian', refresh = 0,
+                          iter = 2000, thin = 2, chains = 3, warmup = 500)
+prior_summary(loyn.rstanarnm)
+#Because we scaled our variables, it is broadly appropriate to use the same priors. If we don't scale, what is a useful prior for one slope, it is not necessarily appropriate for another. 
+
+#We'll go with its default priors 0|26.8 for every beta1 and 0|107 for beta0 (intercept)
+#variance~exp(10.7)
+```
+
+#Diagnostics
+```{r}
+stan_trace(loyn.rstanarnm)
+stan_dens(loyn.rstanarnm, separate_chains = T)
+stan_ess(loyn.rstanarnm) #we could've thinned some more
+stan_ac(loyn.rstanarnm)
+posterior_vs_prior(loyn.rstanarnm, color_by = 'vs',
+                   group_by = T, facet_args = list(scales = 'free_y'))
+
+#Given that we're using gaussian, we don't need to do standardized residuals? straight residuals is fine?
+fit = fitted(loyn.rstanarnm)
+res = residuals(loyn.rstanarnm)
+ggplot(data = NULL) +
+  geom_point(aes(y=res, x = fit)) #residuals plot looks acceptable
+
+```
 
 
 # Model validation
 
+```{r}
+tidyMCMC(loyn.rstanarnm$stanfit, conf.int = T, conf.method = 'HPDinterval', rhat = T, ess = T)
+```
+
+Model 1: Habitats -> Area, grazing and years in isolation
+Model 2: Connectivity -> distance, altitude
+
+```{r}
+loyn.rstanarm1 = stan_glm(ABUND ~ scale(log(AREA)) +
+                            fGRAZE +
+                            scale(YR.ISOL), data = loyn,
+                          family = 'gaussian', refresh = 0,
+                          iter = 2000, thin = 2, chains = 3, warmup = 500)
+waic(loyn.rstanarnm)
+```
+
+```{r}
+waic(loyn.rstanarm1)
+```
+
+```{r}
+loo(loyn.rstanarnm)
+```
+
+```{r}
+loo(loyn.rstanarm1)
+```
+
 # Model investigation / hypothesis testing
+
+```{r}
+tidyMCMC(loyn.rstanarm1$stanfit, conf.int = T, conf.method = 'HPDinterval',rhat = T, ess = T)
+#YR.ISOL is not significant, confidence limits include zero
+#Grazing 5 is significant, and so is AREA. But not grazing 2,3, or 4
+```
 
 # Predictions
 
+```{r}
+loyn.list = with(loyn, list(AREA = seq(min(AREA), max(AREA), len = 100)))
+newdata = emmeans(loyn.rstanarm1, ~AREA|fGRAZE, at = loyn.list, type = 'response') %>% as.data.frame
+head(newdata)
+
+```
+
 # Summary figures
+
+
+```{r}
+ggplot(newdata, aes(y = emmean, x = AREA)) +
+  geom_ribbon(aes(ymin=lower.HPD, ymax=upper.HPD, fill = fGRAZE), alpha = 0.3) +
+  geom_line(aes(color = fGRAZE)) +
+  theme_classic() +
+  scale_x_log10()
+```
+
+This plot shows that the gaussian distribution was not appropriate, because we have negative values?? So we try gamma instead
+
+#Fitting a GAMMA
+
+```{r}
+loyn.rstanarmG = stan_glm(ABUND ~ scale(log(AREA)) + fGRAZE + scale(YR.ISOL), 
+                          data = loyn, family = Gamma(link='log'), refresh = 0, 
+                          iter = 2000, thin = 2, chains = 3, warmup = 500)
+loyn.list = with(loyn, list(AREA = seq(min(AREA), max(AREA), len = 100)))
+newdata = emmeans(loyn.rstanarmG, ~AREA|fGRAZE, at = loyn.list, type = 'response') %>% as.data.frame
+ggplot(newdata, aes(y = response, x = AREA)) +
+  geom_ribbon(aes(ymin=lower.HPD, ymax=upper.HPD, fill = fGRAZE), alpha = 0.3) +
+  geom_line(aes(color = fGRAZE)) +
+  theme_classic() +
+  scale_x_log10() + scale_y_log10()
+```
 
 # References
