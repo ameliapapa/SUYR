@@ -112,6 +112,7 @@ summary(quinn)
 ```{r dataprep, results='markdown', eval=TRUE}
 quinn = quinn %>% mutate(SEASON = factor(SEASON),
                          DENSITY = factor(DENSITY))
+#we declare them as categorical
 ```
 
 	
@@ -130,15 +131,105 @@ $$
 
 where $\boldsymbol{\beta}$ is a vector of effects parameters and $\bf{X}$ is a model matrix representing the intercept and effects of season, density and their interaction on mussel recruitment.
 
+# EDA
+```{r}
+ggplot(quinn, aes(SEASON, RECRUITS, fill= DENSITY)) + geom_boxplot()
+#no homogeneity of variance or normality
+#rather than transforming the data, we tried poisson or negbin. poisson was overdispersed.
+```
+ 
+
 # Fit the model
 
+```{r}
+quinn.rstanNB = stan_glm(RECRUITS ~ SEASON*DENSITY, data = quinn, 
+                         family = 'neg_binomial_2', refresh = 0, 
+                         chains = 3, iter = 5000, thin = 2, warmup = 1000)
+prior_summary(quinn.rstanNB)
+```
+
+```{r}
+posterior_vs_prior(quinn.rstanNB, color_by = 'vs', group_by = T, 
+                   facet_args = list(scales='free_y'))
+```
+
+```{r}
+stan_trace(quinn.rstanNB)
+stan_ess(quinn.rstanNB) #we could've thinned some more
+stan_ac(quinn.rstanNB)
+```
 
 # Model validation
 
+```{r}
+y = quinn.rstanNB$y
+mu = fitted(quinn.rstanNB)
+theta = mean(as.matrix(quinn.rstanNB)[,'reciprocal_dispersion'])
+r = MASS::neg.bin(theta)$dev.resids(y,mu,wt=1)
+res = sqrt(pmax(r,0))
+resid = ifelse(y>mu,res,-res)
+ggplot() + geom_point(data = NULL, aes(y=resid, x = mu))
+```
+
+```{r}
+g = ggpredict(quinn.rstanNB) %>% plot
+g[[1]]
+g[[2]]
+library(gridExtra)
+do.call('grid.arrange',g)
+tidyMCMC(quinn.rstanNB$stanfit, conf.int = T, conf.method = 'HPDinterval', rhat = T, ess = T)
+#We get differences in a log scale!
+```
+
+```{r}
+library(ggeffects)
+#ggeffects(quinn.rstanNB, ~SEASON|DENSITY) %>% plot
+ggemmeans(quinn.rstanNB, ~SEASON|DENSITY) %>% plot
+```
+
 # Model investigation / hypothesis testing
 
+```{r}
+emmeans(quinn.rstanNB, pairwise~DENSITY|SEASON, type = 'response')$contrasts
+#There's support for density effect in summer and a little bit in winter.
+```
+
+```{r}
+library(emmeans)
+quinn.em = emmeans(quinn.rstanNB, pairwise~DENSITY|SEASON, type = 'link')$contrast %>% gather_emmeans_draws() %>% mutate(Fit=exp(.value))
+```
+
+
+```{r}
+quinn.em %>% group_by(contrast, SEASON) %>% summarize(P=sum(Fit>1.1)/n())
+quinn.em %>% group_by(contrast, SEASON) %>% median_hdi %>%
+  ggplot() + geom_pointrange(aes(y=Fit, x = SEASON, ymin = Fit.lower, ymax = Fit.upper)) +
+  geom_hline(yintercept = 1, linetype = 'dashed') + coord_flip() +
+  scale_y_continuous('Effect size (High/Low)')
+
+```
+
+
 # Predictions
+```{r}
+bayes_R2(quinn.rstanNB) %>% median_hdi
+```
+
 
 # Summary figures
+```{r}
+newdata = emmeans(quinn.rstanNB, ~SEASON|DENSITY, type = 'response') %>% as.data.frame
+head(newdata)
+
+g1 = ggplot(newdata, aes(y = prob, x = SEASON, color = DENSITY)) +
+  geom_pointrange(aes(ymin=lower.HPD, ymax=upper.HPD, fill), position = position_dodge(width = 0.2)) 
+
+g2 = quinn.em %>% group_by(contrast,SEASON) %>% median_hdi %>%
+  ggplot() + geom_pointrange(aes(y=Fit, x = SEASON, ymin = Fit.lower, ymax = Fit.upper)) + geom_hline(yintercept = 1, linetype = 'dashed') + coord_flip() + 
+  scale_y_continuous('Effect size (High/Low)')
+
+grid.arrange(g1 + ggtitle('a)') ,g2 + ggtitle('b)'),nrow=1)
+```
+
 
 # References
