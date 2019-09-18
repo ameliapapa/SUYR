@@ -110,19 +110,179 @@ $$
 
 # Fit the model
 
+First we try the poisson:
+```{r}
+peake.glmP = stan_glm(INDIV~log(AREA), data = peake, 
+                      family = poisson(link = 'log'),
+                      iter = 5000, chains = 3, thin = 3,
+                      warmup = 1000, refresh = 0)
+prior_summary(peake.glmP)
+```
+
+In Bayesian we can fit the Negative Binomial straight away, but it might be useful to compare the two models.
+
+```{r}
+#WE ARE ASKING FOR DEVIANCE RESIDUALS -> BUT WHY?
+y = peake.glmP$y
+mu = fitted(peake.glmP)
+r = poisson()$dev.resids(y, mu, wt = 1)
+res = sqrt(pmax(r,0)) #its comparing each of the residuals so far, and its taking the maximum or
+resid = ifelse(y > mu, res, -res)
+ggplot(data = NULL) +
+  geom_point(aes(y=resid, x = mu))
+```
+
+You can't assess overdispersion from just residuals. We were using standardized residuals in frequentist. In Bayesian, we need to look at deviance.
+
+```{r}
+RSS = sum(resid^2) #we sum up the deviance residuals to give deviance. which we could call residuals sum of squares.
+#There is no notion of degrees of freedom.
+RSS/ (length(y)-2) #the formula for overdispersion
+#A dispersion parameter of 67.3. We would be expecting 1, the cutoff is 3. And it is certainly over 3, so the model is overdispersed. The data contains a lot more variability than the poisson would expect it.
+```
+
+The negative binomial shouldn't be overdispersed, unless there's a truck load of zeros. But we checked last time that there were not.
+
+#Fitting Negative Binomial
+
+```{r}
+peake.glmNB = stan_glm(INDIV ~ log(AREA), data = peake, 
+                       family = 'neg_binomial_2',
+                       iter = 5000, warmup = 1000,
+                       chains = 3, thin = 3, refresh = 0)
+#we've increased the warmup : as models become more complex, you increase the proportion of iterations for warmup. it takes longer to realize what's a good jumping length.
+#the priors are not specified, so we need to check that they're not too influential.
+```
+
+```{r}
+#???????????????????????
+posterior_vs_prior(peake.glmNB, color_by = 'vs', group_by = T,
+                   facet_args = list(scales = 'free_y'))
+```
+
+```{r}
+prior_summary(peake.glmNB)
+#We need to keep narrow priors for dispersion, because it can quickly turn into larger values, if not well constrained. 
+```
+
 
 # Model validation
 
+Let's compare Poisson and NB
 
+```{r}
+(l.glmP = loo(peake.glmP))
+```
+
+```{r}
+#"LEAVE ONE OUT" method
+(l.glmNB = loo(peake.glmNB))
+#We want to compare their looic:
+#Poisson -> 1855
+#NB -> 313.6 -> It is definitely the better model
+```
+
+```{r}
+#It is comparing the two loos, and if you get a value of zero, its saying both models are the same. If it's negative, the first model is better.
+compare_models(l.glmP,l.glmNB)
+```
 
 
 # Model investigation / hypothesis testing
 
+```{r}
+w1 = waic(peake.glmP)
+w2 = waic(peake.glmNB)
+compare_models(w1,w2)
+ggpredict(peake.glmNB, ~AREA) %>% plot
+ggpredict(peake.glmNB, terms = 'AREA [exp]') %>% plot #backtransformed
+```
+
+We can clearly see a trend from our area and # of individuals. 
 
 # Predictions
 
+```{r}
+tidyMCMC(peake.glmNB$stanfit, conf.int = T, conf.method = 'HPDinterval', rhat = T, ess = T)
+#Rhats and ESS look good
+#estimate of intercept -1.16 on a log scale.
+#slope associated with AREA on a log scale, 0.825
+#Credibility intervals? (0.665-1.001) don't include 0, so we can say that there's an effect from AREA.
+```
+
+
+- What is the probability that an increase in area is associated with an increase with an increase of the number of individuals?
+
+```{r}
+peake.mcmc = as.matrix(peake.glmNB)
+head(peake.mcmc)
+```
+
+```{r}
+sum(peake.mcmc[,2] > 0)/nrow(peake.mcmc) #we're counting the # of times the slope is greater than zero. The probability is one. 
+```
+
+```{r}
+exp(peake.mcmc[,2]) %>% median_hdi
+#For every one unit change in log(AREA), the number of individuals is multiplied by 2.28. The back transform didn't change x, but only y.
+```
+
+Alternatively, we can look for the sum of slopes greater than 1 using back transformed data
+
+```{r}
+sum(exp(peake.mcmc[,2]) > 1) / nrow(peake.mcmc)
+```
+
+
+- What kind of change does the increase from 5000 to 10000 unit area represent for the number of individuals?
+
+```{r}
+peake.list = with(peake, list(AREA = c(5000,10000)))
+newdata = emmeans(peake.glmNB, ~AREA, at = peake.list, type = 'link') %>% gather_emmeans_draws() %>%
+  spread(key=AREA, value = .value)
+#The results are on the log scale
+```
+
+```{r}
+newdata = newdata %>% mutate(Diff1 = exp(`10000` - `5000`),
+                             Diff2 = exp(`10000`) - exp(`5000`))
+newdata %>% head
+#Diff 1 does the subtraction then backtransforms. Because of the log laws, we have to say that when we go from 10000 to 5000, there's an 83% change. Diff2 says we have an absolute change of 280 individuals when we go from 10000 to 5000 unit area.
+```
+
+
+- What is the probability that a doubling of area (from 5000 to 10000) causes a more than 50% increase in the # of individuals? I sum up the Diff1's that are larger than 1.5.
+```{r}
+sum(newdata[,'Diff1']>1.5)/nrow(newdata)
+```
+
+- What percentage change do you expect in the # of individuals?
+```{r}
+newdata[,'Diff1'] %>% median_hdi
+#on average we would expect a 77% increase, with 95% confidence that it lies between 56% and 97%
+```
+
+In frequentist you are restricted to ask questions because of the type I error rate. In Bayesian, there are no restrictions.
 
 # Summary figures
+
+
+
+```{r}
+bayes_R2(peake.glmNB) %>% hist
+bayes_R2(peake.glmNB) %>% median_hdi
+```
+
+```{r}
+peake.list = with(peake, list(AREA = seq(min(AREA), max(AREA), LEN = 100)))
+newdata = emmeans(peake.glmNB, ~AREA, at = peake.list, type = 'response') %>% as.data.frame
+
+ggplot(newdata, aes(y = prob, x = AREA)) +
+  geom_ribbon(aes(ymin=lower.HPD, ymax=upper.HPD), fill = 'blue', alpha = 0.3)
+  geom_line() +
+  geom_point(data = peake, aes(y = INDIV, x = AREA)) +
+  theme_classic()
+```
 
 
 # References
