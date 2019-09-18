@@ -101,6 +101,9 @@ day = read_csv('../data/day.csv', trim_ws=TRUE)
 glimpse(day)
 ```
 
+```{r}
+day = day %>% mutate(TREAT = factor(TREAT))
+```
 
 
 # Exploratory data analysis
@@ -119,13 +122,155 @@ where $\boldsymbol{\beta}$ is a vector of effects parameters and $\bf{X}$ is a m
 
 # Fit the model
 
+```{r}
+day.rstan = stan_glm(BARNACLE ~ TREAT, data = day,
+                     family = 'poisson',
+                     prior = normal(c(0,0,0), c(2.5,2.5,2.5)),
+                     prior_intercept = normal(0,10),
+                     chains = 3, iter = 2000, warmup = 500, thin = 2, 
+                     refresh = 0)
+#It doesn't scale the priors, because we have categorical data
+prior_summary(day.rstan)
+```
 
-                                           
-# Model validation
+# Diagnostics
+```{r}
+stan_trace(day.rstan)
+stan_dens(day.rstan, separate_chains = T)
+stan_ess(day.rstan) #we could've thinned some more
+stan_ac(day.rstan)
+posterior_vs_prior(day.rstan, color_by = 'vs',
+                   group_by = T, facet_args = list(scales = 'free_y'))
+```
+
+Checking dispersion:
+```{r}
+y = day.rstan$y
+mu = fitted(day.rstan)
+r = poisson()$dev.resids(y,mu,wt=1)
+res = sqrt(pmax(r,0))
+resid = ifelse(y>mu, res, -res)
+ggplot(data = NULL) +
+  geom_point(aes(y=resid, x = mu))
+```
+
+```{r}
+RSS = sum(resid^2) #deviance
+RSS/(length(y)-4) #1 intercept and 3 slopes
+#1.076 is close to one, so we say the data is not overdispersed
+```
+
+Overdispersion is usually caused by a lot of zeros. We can check this way:
+```{r}
+prop_zero = function(y) mean(y ==0)
+(prop_zero_test1 = pp_check(day.rstan, plotfun = "stat", stat = "prop_zero")) #0% of our data contains zeros
+```
+
+#Fitting a NB
+
+```{r}
+day.rstanNB = stan_glm(BARNACLE ~ TREAT, data = day, family = 'neg_binomial_2', chains = 3, iter = 2000, thin = 2, warmup = 500, refresh = 0)
+```
+
+```{r}
+(loo.P = loo(day.rstan))
+```
+
+```{r}
+(loo.NB = loo(day.rstanNB))
+```
+
+The Poisson is simpler, but the Bayesians don't care, and would've run the more complex (NB) to start with.
 
 # Model investigation / hypothesis testing
 
-# Predictions
+```{r}
+ggpredict(day.rstan, ~TREAT) %>% plot
+```
+
+```{r}
+tidyMCMC(day.rstan$stanfit, conf.int = T, conf.method = 'HPDinterval', rhat = T, ess = F)
+#NB is clearly less than ALG1 and TREATS is clearly less than ALG1
+```
+
+```{r}
+day.mcmc = as.matrix(day.rstan)
+head(day.mcmc)
+```
+```{r}
+sum(day.mcmc[,2]>0)/nrow(day.mcmc)
+#The chances of there being a difference between ALG1 and ALG2
+```
+
+Whats the probability that there's more barnacles in the NB than scrape bare?
+
+```{r}
+sum(day.mcmc[,3]-day.mcmc[,4]>0)/nrow(day.mcmc) #column 3 - column 4
+#If the probability would be 0.5, than there's a 50/50 chance that NB>S. So instead you're looking for probabilities from 0.5 to 1.
+```
+
+Instead of doing them separately, we can use Tukey's post hoc tests:
+```{r}
+emmeans(day.rstan, pairwise~TREAT, type = 'response')$contrasts
+```
+
+Because of the back transformation, we're not looking for intervals that cross zero, but intervals that cross 1. 
+
+```{r}
+day.em = emmeans(day.rstan, pairwise~TREAT, type = 'link')$contrasts %>%
+  gather_emmeans_draws() %>%
+  mutate(Fit=exp(.value)) #backtransforming .value and calling it Fit
+day.em %>% head
+```
+
+```{r}
+day.em %>% group_by(contrast) %>% median_hdi()
+#instead of the average contrast values, we can get probabilities 
+day.em %>% group_by(contrast) %>% summarize(P=sum(Fit>1)/n())
+#We know that ALG1 is 80% of ALG2, but what is the probability that ALG1 is greater than ALG2? 3%!
+#BUT what is the probability that ALG2 is greater than ALG1? 1-0.033=97%
+#I'm 100% sure that ALG1 is greater than naturally bare and scrapped. 
+#The probability that NB>S is 78%
+```
+
+```{r}
+day.em %>% group_by(contrast) %>% summarize(P=sum(Fit>1.1)/n())
+```
+
+```{r}
+cmat = cbind('Alg2_Alg1' = c(-1,1,0,0),
+             'NB_S' = c(0,0,1,-1),
+             'Alg_Bare' = c(0.5,0.5,-0.5,-0.5),
+             'Alg_NB' = c(0.5,0.5, -1,0))
+emmeans(day.rstan, ~TREAT, contr = list(TREAT=cmat), type = 'response')
+```
+
+```{r}
+day.em = emmeans(day.rstan, ~TREAT, contr = list(TREAT=cmat), type = 'link')$contrasts %>%
+  gather_emmeans_draws() %>% mutate(Fit=exp(.value))
+day.em %>% group_by(contrast) %>% summarize(P = sum(Fit>1)/n()) #probability that the first group is greater than the second
+```
+
+```{r}
+day.em %>% group_by(contrast) %>% summarize(P = sum(Fit>1.5)/n())
+#I'm 95% confident that Alg groups are more than 50% greater than bare
+```
+
+# R squared
+```{r}
+bayes_R2(day.rstan) %>% median_hdi
+#we explained about 70%
+```
+
+```{r}
+#day.list = with(day, list(BARNACLE = seq(min(BARNACLE), max(BARNACLE), len = 100))) you don't need a grid for categorical data
+newdata = emmeans(day.rstan, ~TREAT, type = 'response') %>% as.data.frame
+head(newdata)
+ggplot(newdata, aes(y = rate, x = TREAT)) +
+  geom_pointrange(aes(ymin=lower.HPD, ymax=upper.HPD)) +
+  theme_classic()
+```
+
 
 # Summary figures
 
