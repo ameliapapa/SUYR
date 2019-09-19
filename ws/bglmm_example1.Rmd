@@ -106,14 +106,210 @@ where $\boldsymbol{\beta}$ and $\boldsymbol{\gamma}$ are vectors of the fixed an
 and $\bf{X}$ is the  model matrix representing the overall intercept and effects of the treatment on the number of lesions.
 $\bf{Z}$ represents a cell means model matrix for the random intercepts associated with leaves.
 
-# Fit the model
 
+We're interested in measuring variance. There's effects (fixed) and varying effects (random).
+
+
+```{r}
+tobacco = tobacco %>% mutate(LEAF = factor(LEAF), TREATMENT = factor(TREATMENT))
+```
+
+# EDA
+
+```{r}
+ggplot(tobacco, aes(y = NUMBER, x = TREATMENT)) + geom_boxplot() 
+ggplot(tobacco, aes(LEAF, NUMBER, linetype = TREATMENT, group = TREATMENT)) + geom_line()
+```
+
+Random intercept would be saying:
+- The first group is Strong (alphabetical). We expect it to have a higher effect than Weak. But this is not always the case.
+
+Random slopes -> the effect is consistent in each plot. There's at least 2/8 leaves that don't have the same degree of effect as the others (L4 & L6). Instead we estimate the effect separately for each leaf, then we average them together.
+
+What we expect from our model:
+- Gaussian -> mu = beta0 + beta1*x where x=TREATMENT, beta0 is the mean of the strong group, and beta1 is the difference between the mean of both groups.
+- 
+
+# Fit the model
+```{r, cache=TRUE}
+tobacco.rstan = stan_glmer(NUMBER ~ (1|LEAF) + TREATMENT, data = tobacco,
+                           family = gaussian, refresh = 0, chains = 3,
+                           iter = 5000, warmup = 500, thin = 5)
+```
+
+We need to put priors on the two estimators, sigma (variance of each observation, and covariance, degree of correlation between each observation)
+
+We don't care how different one leaf is from another, we only care about the effect, thus how variable the leaves are from each other.
+
+```{r}
+prior_summary(tobacco.rstan)
+```
+
+Covariance is calculated for the sigma of "random" effects. There is a correlation between Weak and Strong in Leaf 1. So we can't just use the exponential. 
 
 # Model validation
 
+```{r}
+stan_trace(tobacco.rstan)
+#We might only be interested in effect of intercept and Treatment, but because its a random intercept model, it gives us the effect of each leaf.
+colnames(as.matrix(tobacco.rstan))
+#These are all our parameters. sigma with small s is the overall variance, and sigma with big S is the variance of our intercept (remember random intercept model).
+```
+
+```{r}
+nms = colnames(as.matrix(tobacco.rstan)) #I'm storing these names
+#Now we want something to say we only want the first, second, 11th and 12th.
+```
+
+```{r}
+wch = grep('^.Intercept|^TREATMENT|^[sS]igma',nms) #Pattern matching (1971)
+#We're looking for something that starts with (^) and any character (.) Intercept
+#OR (|) it must start with the word TREATMENT, OR (|) it must start (^) with [sS] small or big S
+```
+
+```{r}
+nms[wch]
+```
+
+Now we ask stan_trace to plot only what we're interested in
+
+```{r}
+stan_trace(tobacco.rstan, pars = nms[wch])
+```
+
+```{r}
+stan_ac(tobacco.rstan, pars = nms[wch]) #they look good
+```
+
+```{r}
+stan_ess(tobacco.rstan, pars = nms[wch])
+```
+
+```{r}
+stan_rhat(tobacco.rstan, pars = nms[wch])
+```
+
+
+```{r}
+posterior_vs_prior(tobacco.rstan, color_by = 'vs', group_by = T, 
+                   facet_args = list(scales = 'free_y'), pars = nms[wch])
+```
+
 # Model investigation / hypothesis testing
 
+We try fitting random slope model:
+```{r}
+tobacco.rstan1 = stan_glmer(NUMBER~(TREATMENT|LEAF) + TREATMENT, data = tobacco,
+                            family = gaussian, refresh = 0,
+                            chains = 3, iter = 5000, warmup = 1000, thin = 5)
+#After increasing the warmup from 500 to 1000, we got less divergent transitions.
+#A small number is not a big problem. They don't impact the estimates, it is just a measure of how ineffieciently the model is running.
+#Another way to remove this issue is to have stronger priors.
+```
+
+```{r}
+nms = colnames(as.matrix(tobacco.rstan1))
+nms
+```
+
+```{r}
+wch = grep('^.Intercept|^TREATMENT|^[sS]igma',nms)
+stan_trace(tobacco.rstan1, pars = nms[wch])
+```
+
+```{r}
+stan_ac(tobacco.rstan1, pars = nms[wch])
+#If we have more complicated models (more complicated likelihoods), it will use smaller jumps, and the autocorrelation will be higher. I probably could thin it slightly more
+```
+
+```{r}
+loo(tobacco.rstan)
+```
+
+```{r}
+loo(tobacco.rstan1) #There is no support for the more complex model, smaller looic
+```
+
+
+```{r}
+compare_models(waic(tobacco.rstan), waic(tobacco.rstan1))
+```
+
+# Residual plot
+
+```{r}
+mu = fitted(tobacco.rstan)
+res = resid(tobacco.rstan)
+ggplot(data = NULL) + geom_point(aes(mu,res))
+ #OR
+augment(tobacco.rstan) %>% ggplot() + geom_point(aes(y = .resid, x= .fitted))
+```
+
 # Predictions
+
+```{r}
+ggpredict(tobacco.rstan) %>% plot
+newdata = emmeans(tobacco.rstan, ~TREATMENT) %>% as.data.frame
+newdata
+```
+
+```{r}
+ggplot(newdata, aes(y = emmean, x = TREATMENT)) + geom_pointrange(aes(ymin = lower.HPD, ymax = upper.HPD))
+```
+
+```{r}
+summary(tobacco.rstan)
+#We're interested in the variance of the LEAF's : Sigma[LEAF:(Intercept),(Intercept)]  13.6
+#Within LEAF variability: sigma--> 4.5
+#There is evidence that there is twice as much variability between the leaves, rather than within the LEAF
+```
+
+
+```{r}
+tidyMCMC(tobacco.rstan$stanfit, conf.int = T, conf.method = 'HPDinterval', rhat = TRUE, ess = TRUE, estimate.method = 'median')
+#TREATMENTWeak	-7.71337412	2.272961	-1.244606e+01	-3.344174	
+#On average, the treatment effect size is a decrease in 7.7. It can decrease from -12.4 to as little as -3.34
+```
+
+# R squared
+
+R squared due to treatment alone:
+```{r}
+bayes_R2(tobacco.rstan, re.form = NA) %>% median_hdi
+#We're 95% sure that we can explain 11 to 58% of the variability with the treatments alone. It's taking away the random effects (re.form = NA).
+```
+
+```{r}
+bayes_R2(tobacco.rstan, re.form = ~(1|LEAF)) %>% median_hdi
+#If we take into account the random effects, our model explains 24-84% of the variability
+```
+
+
+```{r}
+newdata = emmeans(tobacco.rstan, ~TREATMENT) %>% #it is calculating the marginal means for the treatments, it is pulling the values from the individual LEAVES
+  gather_emmeans_draws() %>%                     #it's gathering all of the 2700x2 emmeans for both Strong and Weak into a long format
+  spread(key = TREATMENT, value = .value)        #now we've gone from long to wide. it needs to know which variable will be split up in new columns. I want a column called strong, and what Weak. It also needs to know what values to put in these columns.
+newdata
+```
+
+```{r}
+newdata = newdata %>% mutate(Eff = Strong-Weak, PEff = 100*(Strong-Weak)/Weak) #creates two new columns for the effect (difference between strong and weak), then expressing it as a percentage.
+newdata
+```
+
+
+
+```{r}
+#What is the probability that Strong is greater than weak?
+newdata %>% summarize(Prob = sum(PEff>0)/n()) #99.8%
+
+#What is the probability that Strong is 20% greater than weak?
+newdata %>% summarize(Prob = sum(PEff>20)/n()) #83.3%
+
+#On average, how different are Strong and Weak?
+newdata %>% dplyr::select(Eff, PEff) %>% median_hdi #on average we have a 28.5% different. It could be as low as 8.5% and as high as 48%
+
+```
 
 # Summary figures
 

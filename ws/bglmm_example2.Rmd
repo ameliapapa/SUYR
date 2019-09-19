@@ -127,15 +127,157 @@ where $\boldsymbol{\beta}$ and $\boldsymbol{\gamma}$ are vectors of the fixed an
 and $\bf{X}$ is the  model matrix representing the overall intercept and effects of temperature and (centered) mean fish size on SDA peak.
 $\bf{Z}$ represents a cell means model matrix for the random intercepts associated with individual fish.
 
+
+```{r}
+norin = norin %>% mutate(FISHID = factor(FISHID), TRIAL = factor(TRIAL))
+```
+
+To fit Gaussian, we need to check for assumptions:
+
+```{r}
+ggplot(norin, aes(TRIAL, CHANGE)) + geom_boxplot() 
+#Equally varied and normally distributted? YES
+```
+
+```{r}
+ggplot(norin, aes(SMR_contr, CHANGE, shape = TRIAL, color = TRIAL)) +
+  geom_smooth(method = 'lm') + geom_point()
+#1. Is the change linear? It seems slightly dependent from where it started from, but the linearity assumptions look reasonable
+#2. The slopes for each trial are slightly different 
+```
+
+
+```{r}
+ggplot(norin, aes(MASS, CHANGE, shape = TRIAL, color = TRIAL)) +
+  geom_smooth(method = 'lm') + geom_point()
+# The slopes look fairly similar when you take into account the noise
+# The MASS range is not equal across treatments. Because each fish was exposed to each treatment, the MASS should not be different.
+```
+
+```{r}
+ggplot(norin, aes(y = CHANGE, x = as.numeric(FISHID), color = TRIAL)) +
+  geom_point() + geom_line()
+#There seems to be some cross over for some fish between treatments, so we might consider random slope.
+```
+
+
 # Fit the model
+
+```{r}
+norin.rstan = stan_glmer(CHANGE ~ TRIAL*SMR_contr + MASS + (1|FISHID), data = norin,
+                         iter = 5000, warmup = 1000, chains = 3, thin = 3, 
+                         refresh = 0)
+```
+
+```{r}
+nms = colnames(as.matrix(norin.rstan))
+wch = grep('^.Intercept|^TRIAL|^SMR|^MASS|^[sS]igma',nms)
+nms[wch]
+stan_trace(norin.rstan, pars = nms[wch])
+stan_ac(norin.rstan, pars = nms[wch])
+stan_ess(norin.rstan, pars = nms[wch])
+stan_rhat(norin.rstan, pars = nms[wch])
+posterior_vs_prior(norin.rstan, color_by = 'vs', group_by = T, 
+                   facet_args = list(scales = 'free_y'), pars = nms[wch])
+```
+
+Random slope model:
+```{r}
+norin.rstan1 = stan_glmer(CHANGE ~ TRIAL*SMR_contr + MASS + (TRIAL|FISHID), data = norin, iter = 5000, warmup = 1000, chains = 3, thin = 5, refresh = 0, cores = 3)
+```
+
+
+```{r}
+nms = colnames(as.matrix(norin.rstan1))
+wch = grep('^.Intercept|^TRIAL|^SMR|^MASS|^[sS]igma',nms)
+nms[wch]
+stan_trace(norin.rstan1, pars = nms[wch])
+stan_ac(norin.rstan1, pars = nms[wch]) # we should thin to 10
+stan_ess(norin.rstan1, pars = nms[wch]) # some fairly inefficient sampling happening
+stan_rhat(norin.rstan1, pars = nms[wch])
+posterior_vs_prior(norin.rstan1, color_by = 'vs', group_by = T, 
+                   facet_args = list(scales = 'free_y'), pars = nms[wch])
+```
 
 
 # Model validation
 
+```{r}
+loo(norin.rstan) # looic = 1663
+loo(norin.rstan1) # looic = 1527
+#Looks like we're keeping the more complex model
+```
+
+# Residual plot ~ the fancy way
+
+```{r}
+augment(norin.rstan1) %>% ggplot() + geom_point(aes(y = .resid, x= .fitted))
+#This implies that there is possibly a slight change left. Maybe SMR_contr or MASS was not linear. 
+```
+
+# PARTIAL PLOT
+
+```{r}
+g1 = ggpredict(norin.rstan1) %>% plot
+library(gridExtra)
+do.call('grid.arrange', g1)
+```
+
 # Model investigation / hypothesis testing
 
-# Predictions
+```{r}
+tidyMCMC(norin.rstan1$stanfit, conf.int = T, conf.method = 'HPDinterval', rhat = T, ess = T, pars = nms[wch], estimate.method = 'median') 
+#The model had trouble calculating the Sigmas (lower ess), and we can fix this by using stronger priors
+#The amount of variablity between fish is greater than within fish
+```
+
+TRIALHypoxia	-110.5673177	22.2011142	-152.0757892	-65.2613239	
+TRIALLowSalinity	-79.2207166	32.1760792	-139.3215958	-13.9486113	
+
+- Calculate probability that under Hypoxia there is a smaller metabolic change.
+
+Step 1:
+```{r}
+norin.grid = with(norin, list(SMR_contr = c(min(SMR_contr), mean(SMR_contr), max(SMR_contr))))
+emmeans(norin.rstan1, pairwise~TRIAL|SMR_contr, at = norin.grid)$contrasts
+#The difference in metabolic change from high temp- hypoxia treatment at a low metabolic rate (3.98) is 64.7 units of change. At a low metabolic rate, there is no real evidence that hypoxia-low salinity differ in the change of metabolic rate (credibility intervals cross zero).
+```
+
+Step 2: 
+```{r}
+norin.em = emmeans(norin.rstan1, pairwise~TRIAL|SMR_contr, at = norin.grid) $contrasts %>% 
+  gather_emmeans_draws() %>%
+  mutate(Fit = .value)
+head(norin.em)
+```
+ 
+
+Step 3:
+```{r}
+norin.em %>% group_by(contrast, SMR_contr) %>%
+  summarize(P = sum(Fit>0)/n())
+#At high SMR_contr (6.7) we are not confident that Hypoxia is greater than LowSalinity, because a probability close to .5 can go either way.
+```
+
 
 # Summary figures
+
+```{r}
+newdata = emmeans(norin.rstan1, ~TRIAL|SMR_contr, at = norin.grid) %>% as.data.frame
+ggplot(newdata, aes(x = SMR_contr, y = emmean, color = TRIAL)) +
+  geom_ribbon(aes(ymin = lower.HPD, ymax = upper.HPD, fill = TRIAL), alpha = 0.3, color = NA) +
+  geom_line()
+```
+
+# R squared
+
+```{r}
+bayes_R2(norin.rstan1, re.form = ~(1|FISHID)) %>% median_hdi
+```
+
+```{r}
+bayes_R2(norin.rstan1, re.form = NA) %>% median_hdi
+```
+
 
 # References
