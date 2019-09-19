@@ -108,9 +108,6 @@ where $\boldsymbol{\beta}$ and $\boldsymbol{\gamma}$ are vectors of the fixed an
 and $\bf{X}$ is the model matrix representing the overall intercept and effects of roosting situation and month on starling mass.
 $\bf{Z}$ represents a cell means model matrix for the random intercepts associated with individual birds.
 
-# Fit the model
-
-
 # Model validation
 
 # Model investigation / hypothesis testing
