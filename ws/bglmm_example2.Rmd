@@ -279,5 +279,14 @@ bayes_R2(norin.rstan1, re.form = ~(1|FISHID)) %>% median_hdi
 bayes_R2(norin.rstan1, re.form = NA) %>% median_hdi
 ```
 
+## FIXING THE MODEL
+
+```{r}
+prior_summary(norin.rstan1) # we try changing the prior for sigma from exponential(rate =1) to (rate = 0.5)
+norin.rstan2 = stan_glmer(CHANGE ~ TRIAL*SMR_contr + MASS + (TRIAL|FISHID), data = norin, iter = 5000, warmup = 1000, chains = 3, thin = 5, refresh = 0, 
+                          prior_aux = exponential(0.5),
+                          cores = 3)
+```
+
 
 # References
