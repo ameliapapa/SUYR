@@ -1,0 +1,111 @@
+---
+title: "Q-Mode"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+#Load packages
+library(vegan)
+library(tidyverse)
+library(devtools) #writes packages, and allows you to install packages from places that are not CRAN (github in this case)
+
+#install_github("gavinsimpson/ggvegan") I commented it out so it doesn't run everytime.
+```
+
+```{r}
+library(readr)
+macnally <- read.csv('/Users/test/Desktop/AIMS/SUYR/data/macnally_full.csv', strip.white = T)
+#getwd() -> get working directory
+```
+
+```{r}
+macnally.std <- wisconsin(macnally[,-1]^0.25) # excludes first column and all data is transformed to fourth root
+```
+
+```{r}
+macnally.dist = vegdist(macnally.std, "bray")
+macnally.mds = metaMDS(macnally.dist, k = 2)
+#produced a stress of 0.12, then started again 
+```
+```{r}
+macnally.mds$stress # this is the best stress
+```
+
+```{r}
+stressplot(macnally.mds) # it has a slight nonlinearity, and sometimes even steps
+#The stress is 1- Nonmetric R^2
+#Usually referred to as Non-metric MDS
+```
+
+```{r}
+macnally.mds = metaMDS(macnally[,-1], k=2)
+macnally.sites.scores <- as.data.frame(scores(macnally.mds, display = 'sites'))
+macnally.sites.scores <- data.frame(macnally.sites.scores, macnally) # put original data in the site scores
+macnally.species.scores <- as.data.frame(scores(macnally.mds, display = 'species'))
+macnally.species.scores$Species <- row.names(macnally.species.scores)
+```
+
+
+```{r}
+library(ggvegan)
+autoplot(macnally.mds)
+```
+
+```{r}
+g = ggplot() +
+  geom_point(data = macnally.sites.scores, aes(x = NMDS1, y = NMDS2, color = HABITAT)) +
+  geom_point(data = macnally.species.scores, aes(x = NMDS1, y = NMDS2), color = 'grey') +
+  geom_text(data = macnally.species.scores, aes(x = NMDS1, y = NMDS2, label = Species, 
+                                                hjust = -0.2), show.legend = F,
+            color = 'grey') +
+  geom_vline(xintercept = 0, linetype = 'dashed') +
+  geom_hline(yintercept = 0, linetype = 'dashed') +
+  theme_bw() 
+
+g + geom_density2d(data = macnally.sites.scores, aes(NMDS1, NMDS2, color = HABITAT))
+g + stat_ellipse(data = macnally.sites.scores, aes(NMDS1, NMDS2, color = HABITAT), level = c(0.8,0.95))
+```
+
+
+# Convex Hull
+
+```{r}
+macnally.hull = 
+g + geom_polygon(data = macnally.hull, aes(NMDS1, NMDS2, fill = HABITAT, color = HABITAT), alpha = 0.2)
+```
+
+It does appear graphically that some of the habitats have different bird communities
+
+
+# M Fit
+
+```{r}
+habitat = model.matrix(~-1+macnally$HABITAT)
+envfit = envfit(macnally.mds, env = habitat)
+envfit
+```
+
+```{r}
+#bioenv(comm = macnally.dist, env = decostand(habitat, "standardize"))
+#It doesn't make a lot of sense with categorical variables
+```
+
+
+# ADONIS - Equivalent of a PERMANOVA
+
+```{r}
+adonis(macnally.dist ~ HABITAT, data = macnally)
+#Bird communities do differ between habitats. Doesn't tell you which are different from which.
+#Permutation test because of violation of independence assumption
+
+#adonis(macnally.dist ~ habitat, data = macnally)
+```
+
+```{r}
+simper(macnally.std, macnally$HABITAT)
+```
+

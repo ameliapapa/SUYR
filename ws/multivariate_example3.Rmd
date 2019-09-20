@@ -1,0 +1,44 @@
+---
+title: "multivariate_example3.Rmd"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(vegan)
+library(ggvegan)
+library(tidyverse)
+```
+
+
+```{r}
+dune <- read_csv('/Users/test/Desktop/AIMS/SUYR/data/dune.csv', trim_ws = T)
+dune.dist <- vegdist(wisconsin(dune[,-1]^0.25), "bray")
+head(dune)
+```
+
+
+```{r}
+unique(dune$MANAGEMENT)
+dune.mds = metaMDS(dune.dist, k = 2)
+dune.mds$species <- wascores(dune.mds$points, dune[,-1], expand = T)
+autoplot(dune.mds, geom=c('text'))
+dev.off()
+ordihull(dune.mds, dune$MANAGEMENT,col = 1:4)
+```
+
+```{r}
+#dune.adonis <- adonis(dune.dist ~ dune[,1])
+```
+
+```{r}
+managment <- factor(dune$MANAGEMENT, levels = c("NM", "BF", "HF", "SF"))
+mm <- model.matrix(~managment)
+colnames(mm) <- gsub("managment", "",colnames(mm))
+mm <- data.frame(mm)
+dune.adonis <- adonis(dune.dist~BF+HF+SF, data = mm, perm = 999)
+```
+
