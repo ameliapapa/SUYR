@@ -1,0 +1,159 @@
+---
+title: "Multivariate"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+#Load packages
+library(vegan)
+library(tidyverse)
+library(devtools) #writes packages, and allows you to install packages from places that are not CRAN (github in this case)
+
+#install_github("gavinsimpson/ggvegan") I commented it out so it doesn't run everytime.
+```
+
+```{r}
+#Load data
+library(readr)
+data <- read_csv("../data/data.csv") 
+enviro <- read.csv("../data/enviro.csv", strip.white = T) #trims white space. you could use (trim_ws=T) for read_csv().
+head(enviro)
+#It is common to have species abundances in one file, and the other drivers in the other file
+
+#In data.csv, we don't correlate Site to anything, so we ignore the first column
+data.stnd <- wisconsin(data[,-1]^0.25) #we're also fourth root transforming the data
+data.stnd %>% head #each of our species and sites have been standardized
+```
+
+# Principle component analysis
+
+```{r}
+library(vegan)
+data.rda <- rda(data.stnd, scale=TRUE) #redundancy analysis
+#scale = T, combines in the principle of correlation (covariance would be better)
+summary(data.rda, display = NULL) #we don't need to see the coordinates, so display = NULL
+```
+
+              Inertia 
+Total              10  
+Unconstrained      10  
+10 variables -> 10 species -> Inertia = 10
+
+Eigenvalue -> amount explained by each of the new axeses
+10 units of variation from inertia, and 4.16 of these can be explained by using the first principle component
+The second new axis explains 2.46 units.
+
+After 8, the other 2 explain nothing, because I've already reached the cumulative proportion explained of 1.
+
+Reduction rules
+- Keep as many principle components to hit at least 80% of the variability
+  You never need to explain 100% of the data, much of it its just noise. 80% would      explain the major patterns.
+
+- If there were no correlations in the data, we'd expect an eigenvalue of 10/10=1.Any eigenvalue>1 would explain more than it would by just chance. So we keep all eigenvalues>1. 
+
+- Or you can use a screeplot:
+```{r}
+screeplot(data.rda)
+```
+
+It is plotting the eigenvalues on the y axis, and principle components on the x axis.
+What added benefit do I get from having an extra principle component?
+
+
+# Component loading
+```{r}
+scores(data.rda, choices=1:4,display="species") # columns
+scores(data.rda, choices=1:4,display="sites") # rows
+```
+
+The correlation between the original species and the new axis. Species 3 is strongly correlated with PC1.
+
+# Ordination plot
+
+```{r}
+biplot(data.rda, scaling = 1, main = "Scaling = 1")
+```
+- Sp8 is highly correlated to PC2. It is almost parallel to that axis, but almost not correlated at all to PC1.
+- Sp4 has almost the same degree of correlation to PC1 and PC2.
+- The relative length of the arrows is important. The longer, the more correlated.
+
+
+```{r}
+library(ggvegan)
+library(scales)
+g = autoplot(data.rda, geom = 'text') + theme_bw() # geom=text has sites with names, rather than just dots
+g
+
+eig = eigenvals(data.rda)
+head(eig)
+
+paste(names(eig[1]), sprintf('(%0.1f%% explained var.)', 100* eig[1]/sum(eig))) # It is making a label for the x axis
+# sprintf means s(string)-print-f(format) : it wants to replace 0.1f. It's a floating point, it will round it to 1 decimal place.
+
+g <- g + 
+  scale_y_continuous(paste(names(eig[2]), sprintf('(%0.1f%% explained var.)', 100* eig[2]/sum(eig)))) +
+  scale_x_continuous(paste(names(eig[1]), sprintf('(%0.1f%% explained var.)', 100* eig[1]/sum(eig)))) 
+
+
+circle.prob = 0.68
+r = sqrt(qchisq(circle.prob, df = 2)) * prod(colMeans(data.rda$CA$u[,1:2]^2))^(1/4)
+theta = c(seq(-pi,pi,length = 50), seq(pi,-pi,length = 50))
+circle = data.frame(PC1 = r * cos(theta), PC2 = r * sin(theta))
+g <- g +
+  geom_path(data = circle, aes(y = PC2, x = PC1),color = muted('white'), size = 1/2, alpha = 1/3) 
+g 
+```
+
+
+## Environmental gradients
+
+```{r}
+head(enviro)
+```
+
+# Multiple linear regression
+
+We'd be fitting a model with PC1 against pH + Slope + Alt + Pressure + Substrate(categorical)
+
+Assumptions:
+- Colinearity -> Variance inflation
+
+```{r}
+vif(lm(1:nrow(enviro)~pH + Slope + Altitude + Pressure + Substrate, 
+       data = enviro))
+# It is only the predictors that matter. The response is irrelevant for vif.
+
+# There's a strong relationship between altitude and pressure. We shouldn't include them in the same model, if we want them to be independently identifyable. 
+
+vif(lm(1:nrow(enviro)~pH + Slope + Altitude + Substrate, 
+       data = enviro))
+# Now we see that all our values are less than 3, and we can build a model based on this.
+```
+
+```{r}
+enviro = enviro %>% mutate(Substrate = factor(Substrate))
+```
+
+
+-  Now we use data scores:
+```{r}
+data.sites.scores = as.data.frame(scores(data.rda, display = 'sites'))
+data.species.scores = as.data.frame(scores(data.rda, display = 'species'))
+```
+
+
+```{r}
+summary(lm(data.sites.scores$PC1 ~ pH + Slope + Altitude + Substrate, 
+       data = enviro))
+# PC1 seems to be correlated with altitude.
+
+summary(lm(data.sites.scores$PC2 ~ pH + Slope + Altitude + Substrate, 
+       data = enviro))
+# PC2 seems to be correlated with substrate.
+```
+
+
