@@ -19,3 +19,12 @@ vareveg.dist <- vegdist(wisconsin(vareveg[,-1]^0.25), 'bray')
 vareenv.std <- decostand(vareenv[,-1], "standardize") 
 ```
 
+```{r}
+bioenv(vareveg.dist, vareenv.std)
+```
+
+```{r}
+adonis(vareveg.dist~Ca+Fe+Mn+Baresoil, data = vareenv.std)
+#besides baresoil, the other variables are all useful drivers of the community
+```
+
