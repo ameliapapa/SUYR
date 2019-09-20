@@ -156,4 +156,112 @@ summary(lm(data.sites.scores$PC2 ~ pH + Slope + Altitude + Substrate,
 # PC2 seems to be correlated with substrate.
 ```
 
+## Permutation tests
 
+It shuffles the PC1 and PC2 column values, over and over again, to find out how many times we get a correlation we got between the predictors of data enviro. 
+
+```{r}
+Xmat = model.matrix(~-1 + pH + Slope + Altitude + Substrate, 
+       data = enviro)
+data.env = envfit(data.rda, env = Xmat)
+data.env
+```
+
+Altitude is more strongly correlated to PC1, has higher magnitude value, and the effect is significant.
+SubstrateQuartz is more correlated to PC2.
+
+pH is stronly correlated to PC1, but it comes regularly in the shuffling and it is not significant (Pr(>r) = 0.62). 
+
+- We allow axis to freely rotate or we constrain them so they have to rotate in relation to the predictors
+
+
+# Constrained PCA (Principle Component Analysis)
+
+```{r}
+head(Xmat)
+```
+
+```{r}
+data.rda = rda(data.stnd ~ pH+Slope+Altitude+Substrate, data = enviro, scale = FALSE)
+# We still excluded Pressure, because of the colineary assumption.
+
+vif.cca(data.rda)
+```
+
+```{r}
+summary(data.rda, display = NULL)
+# Because we asked to calculate by covariance, the Inertia doesn't add up to the # of species. 
+# Constrained Proportion 0.6753 -> Our constrained axis explains 67.5% of the total variability
+# RDA 1-4 -> constrained
+# RDA1 explains 34%, RDA2 = 24%. These two explain more than the first unconstrained axis.
+```
+
+```{r}
+anova(data.rda, by = 'axis') 
+# Only the first constrained part shows significant evidence of explaining variability
+```
+
+```{r}
+anova(data.rda,by = 'margin')
+# Patterns in the community can be explained by altitude
+```
+
+```{r}
+RsquareAdj(data.rda)$r.squared # our redundancy analysis explain 67.5% of community patterns
+```
+
+
+
+## Correspondance analysis
+
+```{r}
+data.stnd = decostand(data[,-1], method = "total", MARGIN = 2) 
+#MARGIN=1(row), MARGIN=2(column)
+```
+
+```{r}
+data.ca = cca(data.stnd, scale = F) # unconstrained
+summary(data.ca, display = NULL)
+```
+
+# Constrained correspondance analysis (CCA)
+
+```{r}
+data.cca = cca(data.stnd~ pH + Altitude + Substrate + Slope, data = enviro, scale = F)
+```
+
+```{r}
+anova(data.cca, by ='margin')
+```
+
+```{r}
+RsquareAdj(data.cca)$r.squared
+```
+
+
+## Bray- Curtis dissimilarity
+
+```{r}
+data.dist = vegdist(data.stnd, method = 'bray')
+data.dist
+
+```
+
+## PCA with Bray-Curtis
+
+```{r}
+data.capscale = capscale(data.dist~1, data = enviro) # unconstrained
+summary(data.capscale, display = NULL)
+```
+
+# Constrained PCA with BC
+```{r}
+data.capscale = capscale(data.dist~pH + Altitude + Substrate + Slope, data= enviro)
+summary(data.capscale, display = NULL)
+```
+
+Conditioning on a predictor:
+```{r}
+data.capscale = capscale(data.dist~pH + Condition(Altitude) + Substrate + Slope, data = enviro)
+```
+It standardizes for this variable, but doesn't constrain any of the axes by it.
