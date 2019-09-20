@@ -1,0 +1,21 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r}
+library(vegan)
+```
+
+
+```{r}
+vareveg <- read.csv('../data/vareveg.csv')
+vareenv <- read.csv('../data/vareenv.csv')
+head(vareenv)
+```
+
+```{r}
+vareveg.dist <- vegdist(wisconsin(vareveg[,-1]^0.25), 'bray')
+vareenv.std <- decostand(vareenv[,-1], "standardize") 
+```
+
